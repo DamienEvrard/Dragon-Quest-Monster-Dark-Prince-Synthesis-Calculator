@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-body">
+<aside class="sidebar">
+    <h3>📚 Arbres enregistrés</h3>
+    <div id="saved-trees-list" class="saved-trees-list">
+        <p class="sidebar-empty">Aucun arbre enregistré pour le moment.</p>
+    </div>
+</aside>
+
+<main class="container">
+
+    <form class="form-card" method="post" action="{{ url_for('calculer') }}" id="synth-form">
+        <div class="form-row">
+            <div class="field">
+                <label for="monster">Monstre souhaité (FR ou EN)</label>
+                <input list="monster-list" id="monster" name="monster" placeholder="ex: Gluante / Wing Slime"
+                       value="{{ form_values.monster if form_values else '' }}" required>
+                <datalist id="monster-list">
+                    {% for name in monster_names %}
+                    <option value="{{ name }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+
+            <div class="field">
+                <label for="zone">Dernière zone explorée</label>
+                <input list="zone-list" id="zone" name="zone" placeholder="ex: Terrestria"
+                       value="{{ form_values.zone if form_values else '' }}">
+                <datalist id="zone-list">
+                    {% for name in location_names %}
+                    <option value="{{ name }}">
+                    {% endfor %}
+                </datalist>
+            </div>
+        </div>
+
+        <div class="form-row form-row-talents">
+            <div class="field">
+                <label for="talent1">Talent souhaité 1</label>
+                <input list="talent-list" id="talent1" name="talent1" placeholder="ex: Zap Ward"
+                       value="{{ form_values.talent1 if form_values else '' }}">
+            </div>
+
+            <div class="field">
+                <label for="talent2">Talent souhaité 2</label>
+                <input list="talent-list" id="talent2" name="talent2" placeholder="optionnel"
+                       value="{{ form_values.talent2 if form_values else '' }}">
+            </div>
+
+            <div class="field">
+                <label for="talent3">Talent souhaité 3</label>
+                <input list="talent-list" id="talent3" name="talent3" placeholder="optionnel"
+                       value="{{ form_values.talent3 if form_values else '' }}">
+            </div>
+
+            <datalist id="talent-list">
+                {% for name in talent_names %}
+                <option value="{{ name }}">
+                {% endfor %}
+            </datalist>
+        </div>
+
+        <button type="submit" class="btn-submit">Générer l'arbre de synthèse</button>
+    </form>
+
+    {% if error %}
+    <div class="alert alert-error">⚠️ {{ error }}</div>
+    {% endif %}
+
+    {% if zone_warning %}
+    <div class="alert alert-warning">⚠️ {{ zone_warning }}</div>
+    {% endif %}
+
+    {% if unknown_talents %}
+    <div class="alert alert-warning">⚠️ Talent(s) introuvable(s) dans Talent.csv (ignoré(s)) : {{ unknown_talents|join(', ') }}</div>
+    {% endif %}
+
+    {% if unsolved %}
+    <div class="alert alert-error">
+        {% if search_exhausted %}
+        ⏳ La recherche est trop complexe pour être explorée entièrement (plusieurs talents exigeants combinés sur une généalogie
+        très profonde) et s'est arrêtée avant de trouver une solution — cela <strong>ne veut pas dire que c'est impossible</strong>,
+        juste que ça n'a pas pu être prouvé dans le temps imparti. Essayez avec moins de talents à la fois (un ou deux), vous
+        pourrez ensuite ajouter le dernier une fois les premiers en place.
+        {% else %}
+        ❌ Aucune solution trouvée permettant d'obtenir <strong>{{ monster_display_name }}</strong> avec les talents demandés,
+        avec les données et la zone actuelles. Essayez avec moins de talents, ou une zone plus avancée.
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if tree_html %}
+    <section class="results">
+        <div class="results-header">
+            <h2>Arbre de synthèse — {{ monster_display_name }}</h2>
+            <button type="button" id="btn-save-tree" class="btn-save">💾 Enregistrer cet arbre</button>
+        </div>
+        <div class="legend">
+            <span class="badge badge-capture">📍 zone de capture</span>
+            <span class="badge badge-final">🏆 talent final demandé</span>
+            <span class="badge badge-building">🔧 talent intermédiaire (en construction)</span>
+            <span class="badge badge-level">🎓 niveau recommandé</span>
+            <span class="badge badge-grafted">🔀 arbre intermédiaire greffé</span>
+            <span class="badge badge-missing">❓ introuvable en l'état</span>
+            <span class="legend-hint">Cliquez sur un monstre pour le marquer comme validé ✅</span>
+        </div>
+        {% if used_decomposition %}
+        <p class="solution-cost">
+            <span class="decomp-note">🔀 Recherche simplifiée : les talents demandés ont été résolus indépendamment puis introduits dans l'arbre de l'espèce (plus rapide qu'une recherche exhaustive).</span>
+        </p>
+        {% endif %}
+        {% if unassigned_talent_names %}
+        <div class="alert alert-warning">
+            ⚠️ Talent(s) qui n'ont pas pu être intégrés automatiquement dans cet arbre (aucun emplacement compatible trouvé dans cette généalogie précise, mais leur construction reste possible séparément) :
+            <strong>{{ unassigned_talent_names|join(', ') }}</strong>. Il faudra les construire séparément et les introduire manuellement
+            à la place d'un ingrédient libre de la bonne famille, si possible.
+        </div>
+        {% endif %}
+        {% if impossible_talent_names %}
+        <div class="alert alert-error">
+            ❌ Talent(s) sans AUCUNE source connue dans les données actuelles (ni capture native, ni recette de synthèse) :
+            <strong>{{ impossible_talent_names|join(', ') }}</strong>. Ceux-ci sont réellement hors de portée avec les données disponibles.
+        </div>
+        {% endif %}
+        <div class="tree-wrapper" id="tree-wrapper">
+            {{ tree_html }}
+        </div>
+    </section>
+    {% endif %}
+
+</main>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='tree.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+
+<main class="container container-wide">
+    <h2 class="page-title">📖 Compendium des monstres</h2>
+
+    <div class="filters-bar">
+        <input type="text" id="filter-name" placeholder="Rechercher un nom (FR ou EN)...">
+        <select id="filter-family">
+            <option value="">Toutes les familles</option>
+            {% for f in families %}
+            <option value="{{ f }}">{{ f }}</option>
+            {% endfor %}
+        </select>
+        <select id="filter-rank">
+            <option value="">Tous les rangs</option>
+            {% for r in ranks %}
+            <option value="{{ r }}">{{ r }}</option>
+            {% endfor %}
+        </select>
+        <input type="text" id="filter-location" placeholder="Filtrer par localisation...">
+        <input type="text" id="filter-talent" placeholder="Filtrer par talent...">
+        <span id="result-count" class="result-count"></span>
+    </div>
+
+    <div class="table-wrapper">
+        <table class="data-table" id="monster-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Nom</th>
+                    <th>Famille</th>
+                    <th>Rang</th>
+                    <th>Localisation(s)</th>
+                    <th>Talent principal (natif)</th>
+                    <th>Talents secondaires (apprenables)</th>
+                </tr>
+            </thead>
+            <tbody id="monster-table-body"></tbody>
+        </table>
+    </div>
+</main>
+
+<div id="modal-overlay" class="modal-overlay">
+    <div class="modal-box">
+        <button type="button" class="modal-close" id="modal-close">✕</button>
+        <h3 id="modal-title"></h3>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.MONSTERS_DATA = {{ monsters_json }};
+    window.TALENTS_DATA = {{ talents_json }};
+</script>
+<script src="{{ url_for('static', filename='compendium.js') }}"></script>
+{% endblock %}
