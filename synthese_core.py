@@ -283,6 +283,34 @@ def is_capturable(db, monster_id, reachable_locations):
     return found
 
 
+def build_wild_monsters_data(db, reachable_locations):
+    """Liste de tous les monstres REELS (pas les placeholders de
+    famille/rang) capturables dans les zones accessibles - utilisee par
+    la route /api/monstres-sauvages pour alimenter la liste a cocher
+    "Monstres disponibles dans la nature" sous l'arbre de synthese.
+
+    Trie par famille puis par nom, pour un affichage groupe lisible."""
+    data = []
+    for m in db.monsters:
+        if is_family_placeholder(m):
+            continue
+        locations = is_capturable(db, m["MonsterId"], reachable_locations)
+        if not locations:
+            continue
+        family = db.family_by_id.get(m["FamilyId"], {}).get("Name", "?")
+        rank = db.rank_by_id.get(m["RankId"], {}).get("Name", "?")
+        data.append({
+            "id": m["MonsterId"],
+            "name": m["FrenchName"] or m["Name"],
+            "family": family,
+            "rank": rank,
+            "locations": locations,
+            "icon": f"{m['Identifier']}-thumb.png" if m.get("Identifier") else None,
+        })
+    data.sort(key=lambda d: (d["family"], d["name"]))
+    return data
+
+
 def capture_difficulty(db, monster, reachable_locations):
     """Estime la DIFFICULTE REELLE d'obtention d'un monstre "feuille"
     (capturable ou obtenu via oeuf), utilisee pour departager entre
@@ -381,12 +409,21 @@ def get_talent_recipes(db, talent_id):
     return recipes
 
 
-def monsters_with_talent(db, talent_id, reachable_locations, limit=6):
+def monsters_with_talent(db, talent_id, reachable_locations, limit=6, excluded=None):
     """Monstres REELS (pas les 'familles' placeholder) qui possedent ce
     talent nativement ET qui sont capturables dans les zones
-    accessibles. Trie par nom, limite a 'limit' resultats."""
+    accessibles. Trie par nom, limite a 'limit' resultats.
+
+    'excluded' (optionnel) : ensemble de MonsterId a exclure de la
+    recherche - correspond aux monstres decoches par le joueur dans la
+    liste "Monstres disponibles dans la nature" (cf.
+    build_wild_monsters_data) : le solveur ne doit alors jamais les
+    proposer comme individu sauvage a capturer."""
+    excluded = excluded or frozenset()
     candidates = []
     for mid in db.monsters_by_talent.get(talent_id, []):
+        if mid in excluded:
+            continue
         monster = db.monster_by_id.get(mid)
         if not monster or is_family_placeholder(monster):
             continue
@@ -441,7 +478,7 @@ def find_blocking_talent(db, chain_node):
     return None
 
 
-def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _depth=0, _max_depth=6, _max_options=4):
+def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _depth=0, _max_depth=6, _max_options=4, excluded_wild_ids=None):
     """Construit RECURSIVEMENT la chaine de synthese permettant d'obtenir
     un talent donne. Renvoie un dict:
         {
@@ -459,14 +496,18 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
             ],
             "truncated_options": bool  # s'il y avait plus d'alternatives que 'max_options'
         }
-    """
+
+    'excluded_wild_ids' (optionnel) : ensemble de MonsterId decoches par
+    le joueur dans la liste "Monstres disponibles dans la nature" - ils
+    ne sont jamais proposes comme porteur sauvage direct, ni ici ni dans
+    les slots recursifs."""
     if _visited is None:
         _visited = set()
 
     talent = db.talent_by_id.get(talent_id)
     talent_name = talent["Name"] if talent else f"?({talent_id})"
 
-    wild_candidates = monsters_with_talent(db, talent_id, reachable_locations)
+    wild_candidates = monsters_with_talent(db, talent_id, reachable_locations, excluded=excluded_wild_ids)
 
     node = {
         "talent_id": talent_id,
@@ -487,7 +528,7 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
     for recipe in recipes[:_max_options]:
         if recipe["category"] == "points":
             prereq_id = recipe["combo"][0]
-            sub = resolve_talent_chain(db, prereq_id, reachable_locations, visited_next, _depth + 1, _max_depth, _max_options)
+            sub = resolve_talent_chain(db, prereq_id, reachable_locations, visited_next, _depth + 1, _max_depth, _max_options, excluded_wild_ids)
             node["options"].append({
                 "category": "points",
                 "prereq_talent_name": db.talent_by_id[prereq_id]["Name"],
@@ -497,7 +538,7 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
             })
         else:
             slots = [
-                resolve_talent_chain(db, tid, reachable_locations, visited_next, _depth + 1, _max_depth, _max_options)
+                resolve_talent_chain(db, tid, reachable_locations, visited_next, _depth + 1, _max_depth, _max_options, excluded_wild_ids)
                 for tid in recipe["combo"]
             ]
             node["options"].append({

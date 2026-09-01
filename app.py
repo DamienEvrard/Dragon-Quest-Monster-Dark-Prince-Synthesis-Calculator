@@ -14,7 +14,7 @@ Puis ouvrir:  http://127.0.0.1:5000 dans un navigateur.
 import html
 import json
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from markupsafe import Markup
 
 from synthese_core import (
@@ -22,6 +22,7 @@ from synthese_core import (
     get_reachable_location_ids,
     is_family_placeholder,
     is_capturable,
+    build_wild_monsters_data,
 )
 from solver import solve, decompose_and_graft
 from synthese_core import resolve_talent_chain, simplify_chain, find_blocking_talent, talent_exists_anywhere, get_talent_recipes
@@ -46,6 +47,17 @@ LOCATION_NAMES = [
     for lid in db.location_order
     if db.location_by_id[lid]["Name"]
 ]
+
+
+def parse_excluded_wild_ids(raw_value):
+    """Convertit la valeur brute du champ cache 'excluded_wild' (liste
+    de MonsterId separes par des virgules, envoyee par
+    static/wild-monsters.js a partir de son localStorage) en un
+    frozenset exploitable par le solveur."""
+    raw_value = (raw_value or "").strip()
+    if not raw_value:
+        return frozenset()
+    return frozenset(x.strip() for x in raw_value.split(",") if x.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +176,18 @@ def index():
     )
 
 
+@app.route("/api/monstres-sauvages", methods=["GET"])
+def api_monstres_sauvages():
+    """Liste (JSON) de tous les monstres capturables dans la nature
+    pour la zone indiquee (parametre 'zone', meme convention que le
+    champ "Dernière zone explorée" du formulaire principal), utilisee
+    par static/wild-monsters.js pour peupler la liste a cocher sous
+    l'arbre de synthese."""
+    zone = request.args.get("zone", "").strip()
+    reachable = get_reachable_location_ids(db, zone)
+    return jsonify(build_wild_monsters_data(db, reachable))
+
+
 @app.route("/calculer", methods=["POST"])
 def calculer():
     monster_name = request.form.get("monster", "").strip()
@@ -173,6 +197,7 @@ def calculer():
         request.form.get("talent3", "").strip(),
     ]
     last_zone = request.form.get("zone", "").strip()
+    excluded_wild_ids = parse_excluded_wild_ids(request.form.get("excluded_wild", ""))
 
     error = None
     tree_html = None
@@ -216,8 +241,14 @@ def calculer():
         #    emplacement libre compatible) : recherche complete avec le
         #    budget maximal, plus lente (jusqu'a quelques secondes) mais
         #    la plus a meme de trouver une solution malgre tout.
+        #
+        # 'excluded_wild_ids' (monstres decoches par le joueur dans la
+        # liste "Monstres disponibles dans la nature") est propage a
+        # CHAQUE etape, pour ne jamais proposer un de ces monstres comme
+        # individu capture directement dans l'arbre resultant.
         root, final_talent_ids, unknown_talents, search_exhausted = solve(
-            db, monster["MonsterId"], talent_names, reachable, max_calls=300_000
+            db, monster["MonsterId"], talent_names, reachable, max_calls=300_000,
+            excluded_wild_ids=excluded_wild_ids,
         )
 
         if root is None and search_exhausted:
@@ -226,7 +257,8 @@ def calculer():
                 for n in talent_names if n.strip() and n.strip().lower() in db.talent_by_name
             }
             decomposed_tree, assigned, unassigned = decompose_and_graft(
-                db, monster["MonsterId"], fast_final_ids, reachable
+                db, monster["MonsterId"], fast_final_ids, reachable,
+                excluded_wild_ids=excluded_wild_ids,
             )
 
             if decomposed_tree is not None and not unassigned:
@@ -264,7 +296,8 @@ def calculer():
                     # n'est pas limitee aux emplacements "libres"
                     # identifies a l'avance).
                     full_root, full_final_ids, _, full_exhausted = solve(
-                        db, monster["MonsterId"], talent_names, reachable, max_calls=15_000_000
+                        db, monster["MonsterId"], talent_names, reachable, max_calls=15_000_000,
+                        excluded_wild_ids=excluded_wild_ids,
                     )
                     if full_root is not None:
                         root = full_root
@@ -302,7 +335,8 @@ def calculer():
                     # semblait constructible ; sinon on la tente une
                     # derniere fois ici avec le budget standard.
                     root, final_talent_ids, unknown_talents, search_exhausted = solve(
-                        db, monster["MonsterId"], talent_names, reachable
+                        db, monster["MonsterId"], talent_names, reachable,
+                        excluded_wild_ids=excluded_wild_ids,
                     )
 
         if root is None:

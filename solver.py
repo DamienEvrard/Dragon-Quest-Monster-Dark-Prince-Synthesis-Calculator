@@ -80,6 +80,23 @@ Limite assumee : la greffe ne s'applique qu'aux emplacements ou
 qui couvre la grande majorite des cas pratiques (chaque etape d'une
 chaine "points" ne demande qu'un seul talent par parent).
 ------------------------------------------------------------------
+EXCLUSION DE MONSTRES SAUVAGES ("liste des monstres disponibles")
+------------------------------------------------------------------
+Le joueur peut decocher, dans la liste "Monstres disponibles dans la
+nature" affichee sous l'arbre, des monstres qu'il ne souhaite pas
+utiliser comme individu capture directement dans la nature (ex: il ne
+veut pas farmer tel monstre, ou considere qu'il n'y a pas acces pour
+l'instant). Cette exclusion est representee par 'excluded_wild_ids'
+(un frozenset de MonsterId), qui circule a travers TOUTES les
+fonctions de resolution de ce fichier.
+
+Un monstre exclu n'est simplement plus jamais propose comme feuille
+"capture sauvage" (cout 0) : il reste en revanche parfaitement
+utilisable comme RESULTAT d'une synthese (le joueur peut tres bien
+vouloir l'obtenir par elevage plutot que par capture). C'est cette
+nuance qui justifie de ne desactiver que l'Option 1 ("capture
+sauvage") de solve_monster, sans toucher au reste de la recherche.
+------------------------------------------------------------------
 HYPOTHESES / SIMPLIFICATIONS ASSUMEES (a lire avant de faire confiance
 aux resultats)
 ------------------------------------------------------------------
@@ -333,7 +350,7 @@ def _chain_to_solver_node(db, chain_node, collected=None):
     return None
 
 
-def build_intermediate_talent_trees(db, talent_ids, reachable):
+def build_intermediate_talent_trees(db, talent_ids, reachable, excluded_wild_ids=None):
     """Construit, pour CHAQUE talent de 'talent_ids' (typiquement les 3
     talents finaux demandes), un arbre intermediaire independant du
     monstre final (la maniere la moins couteuse d'obtenir ce talent sur
@@ -345,25 +362,34 @@ def build_intermediate_talent_trees(db, talent_ids, reachable):
     lui-meme n'a pas de porteur sauvage direct, mais que ses
     PREREQUIS, eux, en ont un.
 
+    'excluded_wild_ids' est propage a resolve_talent_chain pour ne
+    jamais proposer un monstre decoche comme porteur sauvage racine
+    d'un arbre intermediaire.
+
     Renvoie {talent_id: noeud_convertit} - seuls les talents pour
     lesquels une solution existe sont presents dans le resultat."""
     trees = {}
     for talent_id in talent_ids:
         if talent_id in trees:
             continue  # deja couvert par la conversion d'une chaine precedente
-        chain = resolve_talent_chain(db, talent_id, reachable)
+        chain = resolve_talent_chain(db, talent_id, reachable, excluded_wild_ids=excluded_wild_ids)
         simplify_chain(chain)
         _chain_to_solver_node(db, chain, collected=trees)
     return trees
 
 
-def solve_monster(db, species_id, required_talents, reachable, budget=None, cache=None, _depth=0, _visited=None, intermediate_trees=None):
+def solve_monster(db, species_id, required_talents, reachable, budget=None, cache=None, _depth=0, _visited=None, intermediate_trees=None, excluded_wild_ids=None):
     """Coeur du moteur : trouve la maniere la MOINS COUTEUSE d'obtenir un
     individu de l'espece 'species_id' qui porte TOUS les talents de
     'required_talents' (frozenset de TalentId).
 
     Renvoie un noeud (dict) ou None si infaisable avec les donnees et la
     zone actuelles.
+
+    'excluded_wild_ids' (frozenset de MonsterId, optionnel) : monstres
+    decoches par le joueur dans la liste "Monstres disponibles dans la
+    nature" - jamais proposes comme individu capture directement (cf.
+    section "EXCLUSION DE MONSTRES SAUVAGES" en tete de fichier).
 
     Noeud renvoye :
         {
@@ -385,6 +411,8 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
         cache = {}
     if _visited is None:
         _visited = set()
+    if excluded_wild_ids is None:
+        excluded_wild_ids = frozenset()
 
     required_talents = frozenset(required_talents)
     key = (species_id, required_talents)
@@ -402,8 +430,9 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
     display_name = monster["FrenchName"] or monster["Name"]
 
     # --- Option 1 : capture sauvage (cout 0), si elle suffit a couvrir
-    #     tous les talents requis -------------------------------------
-    if not is_family_placeholder(monster):
+    #     tous les talents requis - SAUF si ce monstre a ete decoche de
+    #     la liste "Monstres disponibles dans la nature" -------------
+    if not is_family_placeholder(monster) and species_id not in excluded_wild_ids:
         locations = is_capturable(db, species_id, reachable)
         egg_label = None
         if not locations and not db.synth_by_result.get(species_id):
@@ -464,7 +493,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 break
             if best is not None and budget.should_stop_early():
                 break
-            sub = solve_monster(db, cand_id, required_talents, reachable, budget, cache, _depth + 1, visited_next, intermediate_trees)
+            sub = solve_monster(db, cand_id, required_talents, reachable, budget, cache, _depth + 1, visited_next, intermediate_trees, excluded_wild_ids)
             if sub and (best is None or sub["cost"] < best["cost"]):
                 best = sub
 
@@ -503,10 +532,10 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                     break
                 if best is not None and budget.should_stop_early():
                     break
-                sub1 = solve_monster(db, p1s, frozenset(req1), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees)
+                sub1 = solve_monster(db, p1s, frozenset(req1), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees, excluded_wild_ids)
                 if not sub1:
                     continue
-                sub2 = solve_monster(db, p2s, frozenset(req2), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees)
+                sub2 = solve_monster(db, p2s, frozenset(req2), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees, excluded_wild_ids)
                 if not sub2:
                     continue
                 cost = _combine_cost(sub1["cost"], sub2["cost"])
@@ -544,10 +573,10 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 break
             if best is not None and budget.should_stop_early():
                 break
-            inter1 = _solve_intermediate_pair(db, gp1a, gp1b, frozenset(req1), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees)
+            inter1 = _solve_intermediate_pair(db, gp1a, gp1b, frozenset(req1), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees, excluded_wild_ids)
             if not inter1:
                 continue
-            inter2 = _solve_intermediate_pair(db, gp2a, gp2b, frozenset(req2), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees)
+            inter2 = _solve_intermediate_pair(db, gp2a, gp2b, frozenset(req2), reachable, budget, cache, _depth + 1, visited_next, intermediate_trees, excluded_wild_ids)
             if not inter2:
                 continue
             cost = _combine_cost(inter1["cost"], inter2["cost"])
@@ -571,7 +600,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
     return best
 
 
-def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget, cache, depth, visited, intermediate_trees):
+def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget, cache, depth, visited, intermediate_trees, excluded_wild_ids=None):
     """Resout la fusion de 2 grands-parents dans une synthese a 4
     monstres. L'espece resultante intermediaire n'est PAS fixee dans
     les donnees brutes (le jeu la determine par d'autres mecanismes non
@@ -592,10 +621,10 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
             break
         if best is not None and budget.should_stop_early():
             break
-        sub1 = solve_monster(db, gp_a, frozenset(req1), reachable, budget, cache, depth + 1, visited, intermediate_trees)
+        sub1 = solve_monster(db, gp_a, frozenset(req1), reachable, budget, cache, depth + 1, visited, intermediate_trees, excluded_wild_ids)
         if not sub1:
             continue
-        sub2 = solve_monster(db, gp_b, frozenset(req2), reachable, budget, cache, depth + 1, visited, intermediate_trees)
+        sub2 = solve_monster(db, gp_b, frozenset(req2), reachable, budget, cache, depth + 1, visited, intermediate_trees, excluded_wild_ids)
         if not sub2:
             continue
         cost = _combine_cost(sub1["cost"], sub2["cost"])
@@ -619,7 +648,7 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
     return best
 
 
-def solve(db, target_monster_id, target_talent_names, reachable, max_calls=None):
+def solve(db, target_monster_id, target_talent_names, reachable, max_calls=None, excluded_wild_ids=None):
     """Point d'entree public. Resout simultanement le monstre final ET
     les talents demandes (un seul arbre unifie, pas un arbre par
     objectif).
@@ -637,6 +666,11 @@ def solve(db, target_monster_id, target_talent_names, reachable, max_calls=None)
     de basculer sur la strategie de secours decompose_and_graft si elle
     echoue - cf. section "STRATEGIE DE SECOURS" plus haut).
 
+    'excluded_wild_ids' (optionnel) : ensemble des MonsterId decoches
+    par le joueur dans la liste "Monstres disponibles dans la nature",
+    jamais utilises comme individu capture directement (cf. section
+    "EXCLUSION DE MONSTRES SAUVAGES" en tete de fichier).
+
     Renvoie (root_node_ou_None, final_talent_ids, noms_talents_inconnus,
     budget_exhausted). 'budget_exhausted' est True si la recherche a du
     s'arreter par manque de budget SANS avoir prouve l'infaisabilite -
@@ -646,6 +680,9 @@ def solve(db, target_monster_id, target_talent_names, reachable, max_calls=None)
     (ex: plusieurs talents exigeants a la fois sur un monstre a la
     genealogie tres profonde).
     """
+    if excluded_wild_ids is None:
+        excluded_wild_ids = frozenset()
+
     final_talent_ids = set()
     unknown_names = []
     for name in target_talent_names:
@@ -683,23 +720,16 @@ def solve(db, target_monster_id, target_talent_names, reachable, max_calls=None)
             # Condition d'impossibilite PROUVEE (prudente) : le talent
             # n'est natif chez AUCUN monstre reel du jeu, ET aucune
             # recette de synthese de talent ne permet de l'obtenir.
-            # (On n'utilise PAS resolve_talent_chain/simplify_chain ici
-            # car cette derniere ne considere que les porteurs
-            # directement CAPTURABLES comme source valide - un
-            # porteur non capturable mais lui-meme synthetisable,
-            # comme certains boss uniques, serait a tort juge
-            # "impossible" alors que la vraie recherche peut trouver
-            # une solution en explorant sa propre genealogie.)
             if talent_exists_anywhere(db, talent_id) or get_talent_recipes(db, talent_id):
                 all_impossible = False
                 break
         if all_impossible:
             return None, final_talent_ids, unknown_names, False
 
-    intermediate_trees = build_intermediate_talent_trees(db, final_talent_ids, reachable)
+    intermediate_trees = build_intermediate_talent_trees(db, final_talent_ids, reachable, excluded_wild_ids)
 
     budget = _SearchBudget(limit=max_calls)
-    root = solve_monster(db, target_monster_id, frozenset(final_talent_ids), reachable, budget, intermediate_trees=intermediate_trees)
+    root = solve_monster(db, target_monster_id, frozenset(final_talent_ids), reachable, budget, intermediate_trees=intermediate_trees, excluded_wild_ids=excluded_wild_ids)
 
     return root, final_talent_ids, unknown_names, budget.exhausted
 
@@ -752,19 +782,19 @@ def collect_free_slots(node, acc=None):
     return acc
 
 
-def build_species_only_tree(db, target_species, reachable):
+def build_species_only_tree(db, target_species, reachable, excluded_wild_ids=None):
     """Resout l'arbre de l'espece SEULE, sans aucune contrainte de
     talent. Beaucoup plus rapide/leger que la resolution unifiee car il
     n'y a pas de combinatoire de repartition de talents a explorer."""
     budget = _SearchBudget()
-    return solve_monster(db, target_species, frozenset(), reachable, budget)
+    return solve_monster(db, target_species, frozenset(), reachable, budget, excluded_wild_ids=excluded_wild_ids)
 
 
 FAMILY_SCOPE_MAX_CANDIDATES = 20         # nb max d'especes candidates essayees par talent/famille
 FAMILY_SCOPE_MAX_CALLS_PER_CANDIDATE = 150_000  # budget dedie et borne par candidat
 
 
-def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachable, cache=None):
+def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachable, cache=None, excluded_wild_ids=None):
     """DIVIDE & CONQUER : recherche FOCALISEE (un seul talent, une seule
     famille/rang a la fois) parmi les especes REELLES de cette
     famille/rang, capable de porter 'talent_id' - via sa PROPRE
@@ -782,7 +812,10 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
 
     'cache' (dict optionnel, partage entre plusieurs appels) evite de
     refaire la meme recherche si le meme (famille, rang, talent)
-    revient a plusieurs endroits de l'arbre."""
+    revient a plusieurs endroits de l'arbre.
+
+    'excluded_wild_ids' est propage a chaque resolution de candidat
+    (cf. section "EXCLUSION DE MONSTRES SAUVAGES" en tete de fichier)."""
     cache_key = (family_id, rank_id, rank_is_any, talent_id)
     if cache is not None and cache_key in cache:
         return cache[cache_key]
@@ -815,7 +848,7 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
     result = None
     for cand in ordered_candidates:
         budget = _SearchBudget(limit=FAMILY_SCOPE_MAX_CALLS_PER_CANDIDATE)
-        sub = solve_monster(db, cand["MonsterId"], frozenset({talent_id}), reachable, budget)
+        sub = solve_monster(db, cand["MonsterId"], frozenset({talent_id}), reachable, budget, excluded_wild_ids=excluded_wild_ids)
         if sub:
             result = sub
             break  # premier succes : on s'arrete (rapidite avant optimalite)
@@ -825,7 +858,7 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
     return result
 
 
-def decompose_and_graft(db, target_species, final_talent_ids, reachable):
+def decompose_and_graft(db, target_species, final_talent_ids, reachable, excluded_wild_ids=None):
     """Strategie de secours (cf. section 7 ci-dessus) : resout l'espece
     seule, puis introduit independamment chaque talent demande a la
     place d'un ingredient libre compatible (meme famille, et meme rang
@@ -846,6 +879,10 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable):
     talents simultanes sur TOUTE la genealogie ne se produit jamais :
     chaque talent est resolu independamment, un emplacement a la fois.
 
+    'excluded_wild_ids' est propage a chaque etape (arbre de l'espece
+    seule, arbres intermediaires, recherche focalisee) - cf. section
+    "EXCLUSION DE MONSTRES SAUVAGES" en tete de fichier.
+
     Renvoie (species_tree_ou_None, talents_assignes, talents_non_assignes).
     - species_tree est None si meme l'espece seule est infaisable avec
       les donnees/zone actuelles (cas rarissime).
@@ -855,7 +892,7 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable):
       de famille/rang compatible n'existe DU TOUT dans cette
       genealogie precise (limite structurelle, pas un manque de temps).
     """
-    species_tree = build_species_only_tree(db, target_species, reachable)
+    species_tree = build_species_only_tree(db, target_species, reachable, excluded_wild_ids)
     if species_tree is None:
         return None, set(), set(final_talent_ids)
 
@@ -870,7 +907,7 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable):
     assigned = set(already_native)
 
     # --- PASSE 1 : talents simples (racine sauvage directe) ----------
-    intermediate_trees = build_intermediate_talent_trees(db, set(remaining), reachable)
+    intermediate_trees = build_intermediate_talent_trees(db, set(remaining), reachable, excluded_wild_ids)
     for slot in free_slots:
         if slot.get("is_free_slot") is not True:
             continue  # deja utilise par une greffe precedente
@@ -904,7 +941,7 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable):
             rank = slot["free_rank_id"]
             is_any = slot["free_rank_is_any"]
             for talent_id in list(remaining):
-                solved = solve_family_scoped(db, fam, rank, is_any, talent_id, reachable, family_scope_cache)
+                solved = solve_family_scoped(db, fam, rank, is_any, talent_id, reachable, family_scope_cache, excluded_wild_ids)
                 if solved:
                     slot.clear()
                     slot.update(solved)

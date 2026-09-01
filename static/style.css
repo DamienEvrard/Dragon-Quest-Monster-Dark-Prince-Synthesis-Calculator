@@ -794,3 +794,122 @@ details.talent-option:not([open]) > summary::before { content: "▸ "; }
 @media (max-width: 720px) {
     .form-row, .form-row-talents { grid-template-columns: 1fr; }
 }
+
+
+/* --- Monstres disponibles dans la nature (sous l'arbre de synthèse) --- */
+
+.wild-monsters-section {
+    margin-top: 40px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+}
+
+.wild-monsters-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.wild-monsters-header h2 {
+    font-size: 1.05rem;
+    border-left: 4px solid var(--green);
+    padding-left: 10px;
+    margin: 0;
+}
+
+.wild-monsters-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.wild-monsters-actions button {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.wild-monsters-actions button:hover {
+    border-color: var(--purple);
+}
+
+.wild-monsters-hint {
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    margin: 10px 0 16px;
+    max-width: 900px;
+}
+
+.wild-monsters-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 6px 12px;
+    max-height: 480px;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+
+.wild-monsters-family {
+    grid-column: 1 / -1;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    margin: 12px 0 2px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.wild-monsters-family:first-child {
+    margin-top: 0;
+}
+
+.wild-monster-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.wild-monster-item:hover {
+    background: var(--bg-card);
+}
+
+.wild-monster-item input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 15px;
+    height: 15px;
+    accent-color: var(--green);
+    cursor: pointer;
+}
+
+.wild-monster-item .monster-icon {
+    width: 24px;
+    height: 24px;
+}
+
+.wild-monster-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wild-monster-rank {
+    font-size: 0.72rem;
+    flex-shrink: 0;
+}

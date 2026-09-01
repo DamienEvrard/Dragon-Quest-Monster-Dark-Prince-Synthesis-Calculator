@@ -62,6 +62,8 @@
             </datalist>
         </div>
 
+        <input type="hidden" name="excluded_wild" id="excluded_wild" value="">
+
         <button type="submit" class="btn-submit">Générer l'arbre de synthèse</button>
     </form>
 
@@ -86,7 +88,8 @@
         pourrez ensuite ajouter le dernier une fois les premiers en place.
         {% else %}
         ❌ Aucune solution trouvée permettant d'obtenir <strong>{{ monster_display_name }}</strong> avec les talents demandés,
-        avec les données et la zone actuelles. Essayez avec moins de talents, ou une zone plus avancée.
+        avec les données, la zone et les monstres sauvages actuellement sélectionnés. Essayez avec moins de talents, une zone
+        plus avancée, ou recochez quelques monstres décochés dans la liste ci-dessous.
         {% endif %}
     </div>
     {% endif %}
@@ -130,6 +133,26 @@
     </section>
     {% endif %}
 
+    <section class="wild-monsters-section" id="wild-monsters-section">
+        <div class="wild-monsters-header">
+            <h2>🌿 Monstres disponibles dans la nature</h2>
+            <div class="wild-monsters-actions">
+                <button type="button" id="wild-check-all">Tout cocher</button>
+                <button type="button" id="wild-uncheck-all">Tout décocher</button>
+                <span id="wild-monsters-count" class="result-count"></span>
+            </div>
+        </div>
+        <p class="wild-monsters-hint">
+            Liste des monstres capturables dans la nature pour la zone indiquée ci-dessus (« Dernière zone explorée »).
+            Décochez ceux que vous ne souhaitez pas utiliser comme ingrédients de capture directe pour le calcul de l'arbre —
+            ils pourront quand même être obtenus par élevage si nécessaire. Votre sélection est mémorisée sur cet appareil et
+            réappliquée automatiquement la prochaine fois.
+        </p>
+        <div class="wild-monsters-grid" id="wild-monsters-grid">
+            <p class="sidebar-empty">Chargement…</p>
+        </div>
+    </section>
+
 </main>
 </div>
 
@@ -137,4 +160,5 @@
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='tree.js') }}"></script>
+<script src="{{ url_for('static', filename='wild-monsters.js') }}"></script>
 {% endblock %}
