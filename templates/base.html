@@ -9,7 +9,7 @@
 <body>
 
 <header class="page-header">
-    <h1>🐉 DQM: The Dark Prince <span>— Calculateur de synthèse</span></h1>
+    <h1>DQM: The Dark Prince <span>— Calculateur de synthèse</span></h1>
     <nav class="tabs">
         <a href="{{ url_for('index') }}" class="tab {% if active_tab == 'arbre' %}active{% endif %}">Arbre de synthèse</a>
         <a href="{{ url_for('compendium') }}" class="tab {% if active_tab == 'compendium' %}active{% endif %}">Compendium</a>
@@ -20,7 +20,7 @@
 {% block content %}{% endblock %}
 
 <footer class="page-footer">
-    Premier jet — données issues du repo <a href="https://github.com/MetalKid/DQM3_Database" target="_blank">MetalKid/DQM3_Database</a>
+    Données issues du repo <a href="https://github.com/MetalKid/DQM3_Database" target="_blank">MetalKid/DQM3_Database</a>
 </footer>
 
 {% block scripts %}{% endblock %}
