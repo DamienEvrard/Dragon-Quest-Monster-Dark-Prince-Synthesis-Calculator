@@ -30,13 +30,6 @@ from synthese_core import resolve_talent_chain, simplify_chain, find_blocking_ta
 
 app = Flask(__name__)
 
-if __name__ == "__main__":
-    app.run(
-        host="0.0.0.0" if os.environ.get("PORT") else "127.0.0.1",
-        port=int(os.environ.get("PORT", 5000))
-    )
-port = int(os.environ.get("PORT", 5000))
-
 # Chargee une seule fois au demarrage du serveur
 db = Database()
 
