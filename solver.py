@@ -165,10 +165,48 @@ def _wild_cost(db, monster, reachable):
     return (0, capture_difficulty(db, monster, reachable))
 
 
+def _evolving_prereq_ids(transitions):
+    """Parmi les transitions de talent declenchees a un noeud de
+    synthese, ne garde que les prerequis des talents "a points" qui
+    EVOLUENT reellement a CETTE etape (palier superieur d'un Booster,
+    d'un Afficionado, ou de tout autre talent a paliers). Un talent
+    simplement TRANSMIS tel quel a l'enfant (deja possede par un
+    parent, sans aucune transformation) n'a AUCUN prerequis de niveau -
+    seuls les talents qui evoluent ICI comptent pour determiner le
+    niveau recommande des parents de cette synthese (categorie
+    "simple" exclue aussi : combiner 2 talents differents en un
+    nouveau necessite juste de les POSSEDER, pas de les avoir maxes)."""
+    return {t["prereq_ids"][0] for t in transitions if t.get("category") == "points"}
+
+
 def _combine_cost(cost1, cost2):
     """Cout d'un noeud resultant de la combinaison de 2 parents : 1
     synthese de plus, difficultes cumulees."""
     return (1 + cost1[0] + cost2[0], cost1[1] + cost2[1])
+
+
+SINGLE_PARENT_PENALTY = 500.0  # penalite (difficulte) appliquee quand un seul parent porte un talent Booster/Afficionado
+
+
+def _single_parent_penalty(transitions, req1, req2):
+    """Pour les talents "Booster"/"Afficionado" (single_parent_sufficient),
+    un seul des deux parents a TECHNIQUEMENT besoin de deja avoir maxe
+    le talent prerequis - mais avoir les DEUX parents qui l'ont maxe va
+    plus vite en jeu (cf. demande utilisateur). Le solveur privilegie
+    donc, a nombre de syntheses egal, la solution ou LES DEUX parents le
+    portent : on ajoute une legere penalite au score de "difficulte"
+    (2e composante du cout, qui ne l'emporte jamais sur le nombre de
+    syntheses) chaque fois qu'un seul parent porte un tel talent, pour
+    qu'elle ne soit choisie qu'en dernier recours (si aucune solution a
+    2 parents n'existe, ou si elle reduit reellement le nombre de
+    syntheses necessaires)."""
+    penalty = 0.0
+    for t in transitions:
+        if t.get("category") == "points" and t.get("single_parent_sufficient"):
+            prereq = t["prereq_ids"][0]
+            if not (prereq in req1 and prereq in req2):
+                penalty += SINGLE_PARENT_PENALTY
+    return penalty
 
 
 class _SearchBudget:
@@ -240,8 +278,25 @@ def _assign_talents(db, remaining, idx=0, req1=None, req2=None, transitions=None
     for recipe in recipes:
         if recipe["category"] == "points":
             prereq = recipe["combo"][0]
-            transition = {"category": "points", "result_id": talent_id, "prereq_ids": [prereq]}
-            recipe_branches.append(({prereq}, {prereq}, transition))
+            single_ok = recipe.get("single_parent_sufficient", False)
+            transition = {
+                "category": "points",
+                "result_id": talent_id,
+                "prereq_ids": [prereq],
+                "single_parent_sufficient": single_ok,
+            }
+            if single_ok:
+                # Talent "Booster"/"Afficionado" : UN SEUL des deux
+                # parents doit deja avoir maxe le prerequis (avoir les
+                # deux ne fait qu'accelerer le processus, ce n'est pas
+                # une obligation) -> 2 branches symetriques, chacune
+                # bien moins couteuse que d'exiger les deux parents.
+                recipe_branches.append(({prereq}, set(), transition))
+                recipe_branches.append((set(), {prereq}, transition))
+            else:
+                # Tous les autres talents "a points" : LES DEUX parents
+                # doivent deja avoir maxe le prerequis.
+                recipe_branches.append(({prereq}, {prereq}, transition))
         else:
             a, b = recipe["combo"]
             transition = {"category": "simple", "result_id": talent_id, "prereq_ids": [a, b]}
@@ -326,7 +381,12 @@ def _chain_to_solver_node(db, chain_node, collected=None):
             child2 = _chain_to_solver_node(db, slot, collected)
             if not child1 or not child2:
                 return None
-            transition = {"category": "points", "result_id": talent_id, "prereq_ids": [slot["talent_id"]]}
+            transition = {
+                "category": "points",
+                "result_id": talent_id,
+                "prereq_ids": [slot["talent_id"]],
+                "single_parent_sufficient": False,  # les 2 branches sont construites ici de toute facon
+            }
         else:
             child1 = _chain_to_solver_node(db, option["slots"][0], collected)
             child2 = _chain_to_solver_node(db, option["slots"][1], collected)
@@ -463,7 +523,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 "transitions": [],
                 "parent1": None,
                 "parent2": None,
-                "recommended_level": db.recommended_level(required_talents) if required_talents else None,
+                "recommended_level": None,  # capture sauvage : aucun talent n'evolue ici, rien a exiger
                 "cost": _wild_cost(db, monster, reachable),
             }
             cache[key] = node
@@ -550,7 +610,9 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 if not sub2:
                     continue
                 cost = _combine_cost(sub1["cost"], sub2["cost"])
+                cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
                 if best is None or cost < best["cost"]:
+                    evolving_ids = _evolving_prereq_ids(transitions)
                     best = {
                         "kind": "synth",
                         "monster_id": species_id,
@@ -561,7 +623,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                         "transitions": transitions,
                         "parent1": sub1,
                         "parent2": sub2,
-                        "recommended_level": db.recommended_level(remaining) if remaining else None,
+                        "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
                         "cost": cost,
                     }
             continue
@@ -591,7 +653,9 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
             if not inter2:
                 continue
             cost = _combine_cost(inter1["cost"], inter2["cost"])
+            cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
             if best is None or cost < best["cost"]:
+                evolving_ids = _evolving_prereq_ids(transitions)
                 best = {
                     "kind": "synth",
                     "monster_id": species_id,
@@ -602,7 +666,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                     "transitions": transitions,
                     "parent1": inter1,
                     "parent2": inter2,
-                    "recommended_level": db.recommended_level(remaining) if remaining else None,
+                    "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
                     "cost": cost,
                 }
 
@@ -639,7 +703,9 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
         if not sub2:
             continue
         cost = _combine_cost(sub1["cost"], sub2["cost"])
+        cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
         if best is None or cost < best["cost"]:
+            evolving_ids = _evolving_prereq_ids(transitions)
             best = {
                 "kind": "intermediate",
                 "monster_id": None,
@@ -650,7 +716,7 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
                 "transitions": transitions,
                 "parent1": sub1,
                 "parent2": sub2,
-                "recommended_level": db.recommended_level(required_talents) if required_talents else None,
+                "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
                 "cost": cost,
             }
 

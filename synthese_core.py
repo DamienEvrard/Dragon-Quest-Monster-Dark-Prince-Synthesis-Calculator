@@ -407,12 +407,40 @@ def rank_meets_minimum(candidate_rank_id, required_rank_id, required_is_any):
 # 3. Resolution des chaines de talents (coeur de la demande)
 # ---------------------------------------------------------------------------
 
+_STAT_PROGRESSION_KEYWORDS = ("booster", "afficionado", "aficionado")
+
+
+def is_stat_progression_talent(db, talent_id):
+    """Un talent de type "Booster" (Attack/Defence/Agility/Wisdom/HP/MP
+    Booster) ou "Afficionado" (lignes d'affinite elementaire, ex: Frizz
+    Afficionado -> Frizz Virtuoso) suit une regle de synthese
+    PARTICULIERE (fournie par l'utilisateur) : pour debloquer le palier
+    superieur chez l'enfant, il suffit qu'UN SEUL des deux parents ait
+    deja MAXE ce talent - avoir les DEUX parents avec le talent maxe
+    accelere simplement le processus (gain de temps), mais n'est PAS
+    une condition necessaire.
+
+    Tous les AUTRES talents "a points" (un seul prerequis, ex: Shallow
+    Breather -> Deep Breather, ou les differents "Ward" a paliers)
+    suivent au contraire la regle stricte : LES DEUX parents doivent
+    avoir deja maxe le talent prerequis."""
+    talent = db.talent_by_id.get(talent_id)
+    if not talent:
+        return False
+    name = (talent.get("Name") or "").lower()
+    return any(kw in name for kw in _STAT_PROGRESSION_KEYWORDS)
+
+
 def get_talent_recipes(db, talent_id):
     """Renvoie les recettes de synthese de talent pour un talent donne,
     sous forme de liste de dicts:
-        {"category": "points"|"simple", "combo": [...]}
-    - "points": la recette ne cite qu'UN talent -> les DEUX parents
-      doivent le posseder (leurs points cumules visent le max).
+        {"category": "points"|"simple", "combo": [...],
+         "single_parent_sufficient": bool}  # uniquement pour "points"
+    - "points": la recette ne cite qu'UN talent prerequis.
+        - Talents "Booster"/"Afficionado" (single_parent_sufficient=True) :
+          UN SEUL des deux parents doit deja l'avoir maxe.
+        - Tous les autres (single_parent_sufficient=False) : LES DEUX
+          parents doivent deja l'avoir maxe.
     - "simple": la recette cite 2 talents differents -> un parent
       chacun, peu importe le niveau.
     """
@@ -420,7 +448,11 @@ def get_talent_recipes(db, talent_id):
     for r in db.talent_recipes_by_result.get(talent_id, []):
         distinct = list(dict.fromkeys(r["combo"]))
         if len(distinct) == 1:
-            recipes.append({"category": "points", "combo": distinct})
+            recipes.append({
+                "category": "points",
+                "combo": distinct,
+                "single_parent_sufficient": is_stat_progression_talent(db, distinct[0]),
+            })
         elif len(distinct) == 2:
             recipes.append({"category": "simple", "combo": distinct})
     return recipes
@@ -429,7 +461,16 @@ def get_talent_recipes(db, talent_id):
 def monsters_with_talent(db, talent_id, reachable_locations, limit=6, excluded=None):
     """Monstres REELS (pas les 'familles' placeholder) qui possedent ce
     talent nativement ET qui sont capturables dans les zones
-    accessibles. Trie par nom, limite a 'limit' resultats.
+    accessibles. Trie par DIFFICULTE D'OBTENTION croissante (cf.
+    capture_difficulty : rang bas + zone peu avancee en premier), pas
+    par ordre alphabetique - le premier de la liste est ainsi toujours
+    le monstre le plus SIMPLE a obtenir pour porter ce talent. C'est
+    important car ce premier candidat est celui choisi automatiquement
+    pour completer le prerequis d'un noeud de synthese lors de la
+    construction d'une chaine de talent independante (cf.
+    resolve_talent_chain -> simplify_chain -> _chain_to_solver_node
+    dans solver.py, utilisee pour greffer un ingredient "libre").
+    Limite a 'limit' resultats.
 
     'excluded' (optionnel) : ensemble de MonsterId a exclure de la
     recherche - correspond aux monstres decoches par le joueur dans la
@@ -449,8 +490,11 @@ def monsters_with_talent(db, talent_id, reachable_locations, limit=6, excluded=N
             candidates.append({
                 "monster_name": monster["FrenchName"] or monster["Name"],
                 "locations": locations,
+                "difficulty": capture_difficulty(db, monster, reachable_locations),
             })
-    candidates.sort(key=lambda c: c["monster_name"])
+    candidates.sort(key=lambda c: (c["difficulty"], c["monster_name"]))
+    for c in candidates:
+        del c["difficulty"]
     return candidates[:limit]
 
 
@@ -551,6 +595,7 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
                 "prereq_talent_name": db.talent_by_id[prereq_id]["Name"],
                 "max_points": db.talent_max_points.get(prereq_id),
                 "recommended_level": db.recommended_level({prereq_id}),
+                "single_parent_sufficient": recipe.get("single_parent_sufficient", False),
                 "slots": [sub],
             })
         else:

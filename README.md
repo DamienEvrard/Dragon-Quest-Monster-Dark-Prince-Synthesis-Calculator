@@ -1,7 +1,7 @@
 # Calculateur de synthese - DQM: The Dark Prince 
 
 ## TBD
-- Calcule du niveau minimum des parents de la synthèse pour débloquer un nouveau talent -> les 2 talents parent doivent être maxés
+- A revoir (remettre les 2 parents doivent avaoir les talent pour debloquer le prochain palier du talent) Calcule du niveau minimum des parents de la synthèse pour débloquer un nouveau talent -> les 2 talents parent doivent être maxés
 - Retirer la traduction française des talents & skills
 - Liste des monstres dressables triés par régions 
 - Possibilité pour chaque monstre de l'arbre de le substituer par un autre monstre éligible, la suite de l'arbre à partir de ce noeux est recalculé
