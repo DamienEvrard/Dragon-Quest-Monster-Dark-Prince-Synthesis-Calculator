@@ -211,33 +211,50 @@ class Database:
                 return lvl
         return None
 
-    def level_for_combined_points(self, target_points):
-        """Niveau MINIMUM auquel DEUX parents fusionnes a ce meme niveau
-        auraient, a eux deux, assez de points cumules pour atteindre
-        'target_points' (ex: 200 pts pour faire evoluer Attack Booster II
-        vers III). Chaque parent est suppose avoir invest tous ses points
-        dans CE talent ; on cherche donc le niveau L tel que
-        2 x Total(L) >= target_points."""
+    def level_for_maxed_points(self, target_points):
+        """Niveau MINIMUM auquel UN monstre, en investissant tous ses
+        points de competence disponibles, a accumule assez de points
+        pour MAXER 'target_points' (ex: 200 pts pour maxer Attack
+        Booster II).
+
+        IMPORTANT (correction) : lors d'une synthese "a points" (ex:
+        Attack Booster II -> III), les DEUX parents doivent CHACUN avoir
+        deja MAXE le talent prerequis - ce n'est PAS un pot commun ou
+        les points des 2 parents s'additionnent. Le niveau requis est
+        donc celui auquel UN SEUL monstre (courbe SkillPointLevel.csv)
+        atteint 'target_points', et ce MEME niveau est exige des DEUX
+        parents (pas de division par 2)."""
         if not target_points:
             return DEFAULT_MIN_LEVEL
         for lvl, cumulative in self.level_points_curve:
-            if 2 * cumulative >= target_points:
+            if cumulative >= target_points:
                 return max(lvl, DEFAULT_MIN_LEVEL)
-        # meme au niveau max les 2 parents combines n'atteignent pas le seuil
+        # meme au niveau max, un monstre seul n'atteint pas le seuil
         return self.level_points_curve[-1][0] if self.level_points_curve else DEFAULT_MIN_LEVEL
 
     def recommended_level(self, talent_ids):
-        """Niveau recommande pour qu'un monstre puisse faire evoluer les
-        talents donnes (en les combinant avec un 2e parent identique).
+        """Niveau recommande pour qu'un monstre (l'UN OU L'AUTRE des 2
+        parents d'une synthese, le MEME niveau etant exige des deux)
+        puisse porter les talents donnes DEJA MAXES.
 
-        Si le noeud doit faire evoluer PLUSIEURS talents A LA FOIS (ex:
-        2 talents actifs sur le meme parent), le niveau doit permettre
-        d'accumuler assez de points pour CHACUN d'eux independamment -
-        chaque talent a sa propre barre de points a remplir, avec le
-        MEME pool de points gagnes par niveau. Le seuil total necessaire
-        est donc la SOMME des seuils de chaque talent (pas seulement le
-        plus exigeant), sinon on sous-estimerait le niveau reellement
-        necessaire des que plusieurs talents evoluent simultanement.
+        CORRECTION IMPORTANTE : lors d'une synthese "a points" (ex:
+        Attack Booster II -> III), les recettes de TalentSynthesis.csv
+        exigent que les DEUX parents aient INDIVIDUELLEMENT deja MAXE
+        le talent prerequis - ce n'est jamais un cumul a deux (leurs
+        points ne se combinent pas). Le niveau recommande est donc
+        celui auquel UN SEUL monstre atteint le seuil de points requis
+        (cf. level_for_maxed_points), et ce meme niveau s'applique aux
+        DEUX parents.
+
+        Si le noeud doit faire evoluer PLUSIEURS talents A LA FOIS sur
+        UN MEME parent (ex: 2 talents actifs simultanement), le niveau
+        doit permettre d'accumuler assez de points pour CHACUN d'eux
+        independamment - chaque talent a sa propre barre de points a
+        remplir, avec le MEME pool de points gagnes par niveau. Le
+        seuil total necessaire POUR CE PARENT est donc la SOMME des
+        seuils de chaque talent (pas seulement le plus exigeant), sinon
+        on sous-estimerait le niveau reellement necessaire des que
+        plusieurs talents evoluent simultanement sur le meme individu.
 
         Si aucun des talents n'a de seuil de points connu (ou liste
         vide), on applique le niveau minimum par defaut
@@ -252,7 +269,7 @@ class Database:
             found_any = True
         if not found_any:
             return DEFAULT_MIN_LEVEL
-        return max(self.level_for_combined_points(total_points), DEFAULT_MIN_LEVEL)
+        return max(self.level_for_maxed_points(total_points), DEFAULT_MIN_LEVEL)
 
 
 # ---------------------------------------------------------------------------

@@ -62,6 +62,14 @@
             </datalist>
         </div>
 
+        <div class="form-row form-row-options">
+            <label class="checkbox-field">
+                <input type="checkbox" id="include_eggs" name="include_eggs" value="1"
+                       {% if form_values is none or form_values.include_eggs %}checked{% endif %}>
+                🥚 Prendre en compte les monstres obtenus uniquement par œuf
+            </label>
+        </div>
+
         <input type="hidden" name="excluded_wild" id="excluded_wild" value="">
 
         <button type="submit" class="btn-submit">Générer l'arbre de synthèse</button>
@@ -144,6 +152,9 @@
         </div>
         <p class="wild-monsters-hint">
             Liste des monstres capturables dans la nature pour la zone indiquée ci-dessus (« Dernière zone explorée »).
+            Décochez ceux que vous ne souhaitez pas utiliser comme ingrédients de capture directe pour le calcul de l'arbre —
+            ils pourront quand même être obtenus par élevage si nécessaire. Votre sélection est mémorisée sur cet appareil et
+            réappliquée automatiquement la prochaine fois.
         </p>
         <div class="wild-monsters-grid" id="wild-monsters-grid">
             <p class="sidebar-empty">Chargement…</p>

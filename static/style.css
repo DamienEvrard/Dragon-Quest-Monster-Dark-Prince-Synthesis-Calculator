@@ -913,3 +913,26 @@ details.talent-option:not([open]) > summary::before { content: "▸ "; }
     font-size: 0.72rem;
     flex-shrink: 0;
 }
+
+/* --- Case a cocher "Prendre en compte les monstres issus d'oeuf" --- */
+
+.form-row-options {
+    display: block;
+    margin-top: 14px;
+}
+
+.checkbox-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.checkbox-field input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}

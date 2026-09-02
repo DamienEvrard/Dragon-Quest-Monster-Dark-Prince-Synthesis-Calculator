@@ -13,7 +13,6 @@ Puis ouvrir:  http://127.0.0.1:5000 dans un navigateur.
 
 import html
 import json
-import os
 
 from flask import Flask, render_template, request, jsonify
 from markupsafe import Markup
@@ -174,6 +173,7 @@ def index():
         monster_names=MONSTER_NAMES,
         talent_names=TALENT_NAMES,
         location_names=LOCATION_NAMES,
+        form_values=None,
     )
 
 
@@ -199,6 +199,7 @@ def calculer():
     ]
     last_zone = request.form.get("zone", "").strip()
     excluded_wild_ids = parse_excluded_wild_ids(request.form.get("excluded_wild", ""))
+    include_eggs = request.form.get("include_eggs") == "1"
 
     error = None
     tree_html = None
@@ -249,7 +250,7 @@ def calculer():
         # individu capture directement dans l'arbre resultant.
         root, final_talent_ids, unknown_talents, search_exhausted = solve(
             db, monster["MonsterId"], talent_names, reachable, max_calls=300_000,
-            excluded_wild_ids=excluded_wild_ids,
+            excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs,
         )
 
         if root is None and search_exhausted:
@@ -259,7 +260,7 @@ def calculer():
             }
             decomposed_tree, assigned, unassigned = decompose_and_graft(
                 db, monster["MonsterId"], fast_final_ids, reachable,
-                excluded_wild_ids=excluded_wild_ids,
+                excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs,
             )
 
             if decomposed_tree is not None and not unassigned:
@@ -298,7 +299,7 @@ def calculer():
                     # identifies a l'avance).
                     full_root, full_final_ids, _, full_exhausted = solve(
                         db, monster["MonsterId"], talent_names, reachable, max_calls=15_000_000,
-                        excluded_wild_ids=excluded_wild_ids,
+                        excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs,
                     )
                     if full_root is not None:
                         root = full_root
@@ -337,7 +338,7 @@ def calculer():
                     # derniere fois ici avec le budget standard.
                     root, final_talent_ids, unknown_talents, search_exhausted = solve(
                         db, monster["MonsterId"], talent_names, reachable,
-                        excluded_wild_ids=excluded_wild_ids,
+                        excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs,
                     )
 
         if root is None:
@@ -369,6 +370,7 @@ def calculer():
             "talent2": talent_names[1],
             "talent3": talent_names[2],
             "zone": last_zone,
+            "include_eggs": include_eggs,
         },
     )
 
