@@ -134,6 +134,17 @@ class Database:
         for mt in self.monster_talents:
             self.talent_ids_by_monster.setdefault(mt["MonsterId"], set()).add(mt["TalentId"])
 
+        # Uniquement les talents "principaux" (IsPrimary=TRUE) de chaque
+        # monstre - ce sont les SEULS talents natifs qu'un monstre
+        # obtient automatiquement lors d'une SYNTHESE (par opposition a
+        # une capture directe dans la nature, qui donne acces a TOUS
+        # ses talents natifs, principal + secondaires). Cf.
+        # get_synth_native_talents.
+        self.primary_talent_ids_by_monster = {}
+        for mt in self.monster_talents:
+            if mt.get("IsPrimary", "").strip().lower() == "true":
+                self.primary_talent_ids_by_monster.setdefault(mt["MonsterId"], set()).add(mt["TalentId"])
+
         # Monstres (reels) qui possedent chaque talent (pour recherche inverse)
         self.monsters_by_talent = {}
         for mt in self.monster_talents:
@@ -413,17 +424,18 @@ _STAT_PROGRESSION_KEYWORDS = ("booster", "afficionado", "aficionado")
 def is_stat_progression_talent(db, talent_id):
     """Un talent de type "Booster" (Attack/Defence/Agility/Wisdom/HP/MP
     Booster) ou "Afficionado" (lignes d'affinite elementaire, ex: Frizz
-    Afficionado -> Frizz Virtuoso) suit une regle de synthese
-    PARTICULIERE (fournie par l'utilisateur) : pour debloquer le palier
-    superieur chez l'enfant, il suffit qu'UN SEUL des deux parents ait
-    deja MAXE ce talent - avoir les DEUX parents avec le talent maxe
-    accelere simplement le processus (gain de temps), mais n'est PAS
-    une condition necessaire.
+    Afficionado -> Frizz Virtuoso) suit une regle PARTICULIERE (fournie
+    par l'utilisateur) : seul un individu CAPTURE DIRECTEMENT DANS LA
+    NATURE peut posseder ce type de talent des le depart - un monstre
+    obtenu par SYNTHESE ne l'obtient JAMAIS automatiquement (meme s'il
+    s'agit du talent principal de son espece), il ne peut que
+    l'HERITER d'un parent qui, en remontant la genealogie, finit par
+    provenir d'une capture sauvage. Cf. get_synth_native_talents.
 
-    Tous les AUTRES talents "a points" (un seul prerequis, ex: Shallow
-    Breather -> Deep Breather, ou les differents "Ward" a paliers)
-    suivent au contraire la regle stricte : LES DEUX parents doivent
-    avoir deja maxe le talent prerequis."""
+    Par ailleurs, pour synthetiser le palier superieur (ex: Attack
+    Booster II -> III), LES DEUX parents doivent avoir deja maxe le
+    talent prerequis (regle identique a tous les autres talents "a
+    points")."""
     talent = db.talent_by_id.get(talent_id)
     if not talent:
         return False
@@ -431,16 +443,31 @@ def is_stat_progression_talent(db, talent_id):
     return any(kw in name for kw in _STAT_PROGRESSION_KEYWORDS)
 
 
+def get_synth_native_talents(db, monster_id):
+    """Talents qu'un monstre obtient AUTOMATIQUEMENT lors d'une
+    SYNTHESE (par opposition a une capture directe dans la nature) :
+    uniquement son talent PRINCIPAL ('IsPrimary' = TRUE dans
+    MonsterTalent.csv) - ses talents secondaires ne sont disponibles
+    que s'ils sont herites d'un parent (transmission classique, cf.
+    remaining/_assign_talents dans solver.py).
+
+    De plus, les talents de type "Booster"/"Afficionado" (cf.
+    is_stat_progression_talent) ne sont JAMAIS obtenus de cette facon,
+    meme s'ils constituent le talent principal de l'espece : seul un
+    individu CAPTURE dans la nature peut les posseder d'entree - ils
+    doivent donc necessairement etre herites d'un parent qui remonte,
+    en bout de chaine, a une capture sauvage."""
+    primary = db.primary_talent_ids_by_monster.get(monster_id, set())
+    return {t for t in primary if not is_stat_progression_talent(db, t)}
+
+
 def get_talent_recipes(db, talent_id):
     """Renvoie les recettes de synthese de talent pour un talent donne,
     sous forme de liste de dicts:
-        {"category": "points"|"simple", "combo": [...],
-         "single_parent_sufficient": bool}  # uniquement pour "points"
-    - "points": la recette ne cite qu'UN talent prerequis.
-        - Talents "Booster"/"Afficionado" (single_parent_sufficient=True) :
-          UN SEUL des deux parents doit deja l'avoir maxe.
-        - Tous les autres (single_parent_sufficient=False) : LES DEUX
-          parents doivent deja l'avoir maxe.
+        {"category": "points"|"simple", "combo": [...]}
+    - "points": la recette ne cite qu'UN talent prerequis -> LES DEUX
+      parents doivent deja l'avoir maxe (aucune exception : meme pour
+      les talents "Booster"/"Afficionado", cf. is_stat_progression_talent).
     - "simple": la recette cite 2 talents differents -> un parent
       chacun, peu importe le niveau.
     """
@@ -448,11 +475,7 @@ def get_talent_recipes(db, talent_id):
     for r in db.talent_recipes_by_result.get(talent_id, []):
         distinct = list(dict.fromkeys(r["combo"]))
         if len(distinct) == 1:
-            recipes.append({
-                "category": "points",
-                "combo": distinct,
-                "single_parent_sufficient": is_stat_progression_talent(db, distinct[0]),
-            })
+            recipes.append({"category": "points", "combo": distinct})
         elif len(distinct) == 2:
             recipes.append({"category": "simple", "combo": distinct})
     return recipes
@@ -595,7 +618,6 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
                 "prereq_talent_name": db.talent_by_id[prereq_id]["Name"],
                 "max_points": db.talent_max_points.get(prereq_id),
                 "recommended_level": db.recommended_level({prereq_id}),
-                "single_parent_sufficient": recipe.get("single_parent_sufficient", False),
                 "slots": [sub],
             })
         else:

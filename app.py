@@ -77,19 +77,11 @@ def render_transition_banner(db, transitions):
             prereq = prereq_names[0]
             max_points = db.talent_max_points.get(t["prereq_ids"][0])
             level = db.recommended_level(set(t["prereq_ids"]))
-            if t.get("single_parent_sufficient"):
-                txt = (
-                    f'🔧 Un des deux parents doit déjà avoir <strong>{prereq}</strong> maxé '
-                    f'(≥ {max_points} pts) → devient <strong>{result_name}</strong> '
-                    f'<span class="dim">(l\'avoir sur les deux parents accélère juste le processus)</span> '
-                    f'— 🎓 niveau {level}+'
-                )
-            else:
-                txt = (
-                    f'🔧 Les DEUX parents doivent déjà avoir <strong>{prereq}</strong> maxé '
-                    f'(≥ {max_points} pts chacun) → devient <strong>{result_name}</strong> '
-                    f'— 🎓 niveau {level}+'
-                )
+            txt = (
+                f'🔧 Les DEUX parents doivent déjà avoir <strong>{prereq}</strong> maxé '
+                f'(≥ {max_points} pts chacun) → devient <strong>{result_name}</strong> '
+                f'— 🎓 niveau {level}+'
+            )
         else:
             a, b = prereq_names
             txt = (

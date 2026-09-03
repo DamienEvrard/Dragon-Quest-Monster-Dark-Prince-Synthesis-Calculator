@@ -139,6 +139,7 @@ from synthese_core import (
     simplify_chain,
     get_egg_source_label,
     capture_difficulty,
+    get_synth_native_talents,
 )
 
 MAX_DEPTH = 16
@@ -183,30 +184,6 @@ def _combine_cost(cost1, cost2):
     """Cout d'un noeud resultant de la combinaison de 2 parents : 1
     synthese de plus, difficultes cumulees."""
     return (1 + cost1[0] + cost2[0], cost1[1] + cost2[1])
-
-
-SINGLE_PARENT_PENALTY = 500.0  # penalite (difficulte) appliquee quand un seul parent porte un talent Booster/Afficionado
-
-
-def _single_parent_penalty(transitions, req1, req2):
-    """Pour les talents "Booster"/"Afficionado" (single_parent_sufficient),
-    un seul des deux parents a TECHNIQUEMENT besoin de deja avoir maxe
-    le talent prerequis - mais avoir les DEUX parents qui l'ont maxe va
-    plus vite en jeu (cf. demande utilisateur). Le solveur privilegie
-    donc, a nombre de syntheses egal, la solution ou LES DEUX parents le
-    portent : on ajoute une legere penalite au score de "difficulte"
-    (2e composante du cout, qui ne l'emporte jamais sur le nombre de
-    syntheses) chaque fois qu'un seul parent porte un tel talent, pour
-    qu'elle ne soit choisie qu'en dernier recours (si aucune solution a
-    2 parents n'existe, ou si elle reduit reellement le nombre de
-    syntheses necessaires)."""
-    penalty = 0.0
-    for t in transitions:
-        if t.get("category") == "points" and t.get("single_parent_sufficient"):
-            prereq = t["prereq_ids"][0]
-            if not (prereq in req1 and prereq in req2):
-                penalty += SINGLE_PARENT_PENALTY
-    return penalty
 
 
 class _SearchBudget:
@@ -278,25 +255,12 @@ def _assign_talents(db, remaining, idx=0, req1=None, req2=None, transitions=None
     for recipe in recipes:
         if recipe["category"] == "points":
             prereq = recipe["combo"][0]
-            single_ok = recipe.get("single_parent_sufficient", False)
-            transition = {
-                "category": "points",
-                "result_id": talent_id,
-                "prereq_ids": [prereq],
-                "single_parent_sufficient": single_ok,
-            }
-            if single_ok:
-                # Talent "Booster"/"Afficionado" : UN SEUL des deux
-                # parents doit deja avoir maxe le prerequis (avoir les
-                # deux ne fait qu'accelerer le processus, ce n'est pas
-                # une obligation) -> 2 branches symetriques, chacune
-                # bien moins couteuse que d'exiger les deux parents.
-                recipe_branches.append(({prereq}, set(), transition))
-                recipe_branches.append((set(), {prereq}, transition))
-            else:
-                # Tous les autres talents "a points" : LES DEUX parents
-                # doivent deja avoir maxe le prerequis.
-                recipe_branches.append(({prereq}, {prereq}, transition))
+            transition = {"category": "points", "result_id": talent_id, "prereq_ids": [prereq]}
+            # LES DEUX parents doivent deja avoir maxe le prerequis
+            # pour debloquer le palier superieur - aucune exception,
+            # meme pour les talents "Booster"/"Afficionado" : on ne
+            # construit plus de branche ou un seul parent le porterait.
+            recipe_branches.append(({prereq}, {prereq}, transition))
         else:
             a, b = recipe["combo"]
             transition = {"category": "simple", "result_id": talent_id, "prereq_ids": [a, b]}
@@ -381,12 +345,7 @@ def _chain_to_solver_node(db, chain_node, collected=None):
             child2 = _chain_to_solver_node(db, slot, collected)
             if not child1 or not child2:
                 return None
-            transition = {
-                "category": "points",
-                "result_id": talent_id,
-                "prereq_ids": [slot["talent_id"]],
-                "single_parent_sufficient": False,  # les 2 branches sont construites ici de toute facon
-            }
+            transition = {"category": "points", "result_id": talent_id, "prereq_ids": [slot["talent_id"]]}
         else:
             child1 = _chain_to_solver_node(db, option["slots"][0], collected)
             child2 = _chain_to_solver_node(db, option["slots"][1], collected)
@@ -496,6 +455,13 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
         return None
 
     native = db.talent_ids_by_monster.get(species_id, set())
+    # Talents qu'un individu SYNTHETISE (pas capture) de cette espece
+    # obtient automatiquement : uniquement son talent principal
+    # ('IsPrimary'), et jamais les talents "Booster"/"Afficionado" (cf.
+    # get_synth_native_talents) - tout le reste doit etre herite d'un
+    # parent. Seule une capture sauvage directe (Option 1 ci-dessous)
+    # donne acces a l'integralite des talents natifs de l'espece.
+    synth_native = get_synth_native_talents(db, species_id)
     display_name = monster["FrenchName"] or monster["Name"]
 
     # --- Option 1 : capture sauvage (cout 0), si elle suffit a couvrir
@@ -584,8 +550,11 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
         return best
 
     # --- Option 3 : synthese (recettes a 2 parents fixes OU a 4 monstres
-    #     via grands-parents) ---------------------------------------
-    remaining = required_talents - native
+    #     via grands-parents) : le resultat n'obtient automatiquement
+    #     que son talent principal (+ ce qu'il herite des parents), PAS
+    #     l'integralite de ses talents natifs (cf. synth_native
+    #     ci-dessus / get_synth_native_talents) ---------------------
+    remaining = required_talents - synth_native
     recipes = db.synth_by_result.get(species_id, [])
     best = None
 
@@ -610,7 +579,6 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 if not sub2:
                     continue
                 cost = _combine_cost(sub1["cost"], sub2["cost"])
-                cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
                 if best is None or cost < best["cost"]:
                     evolving_ids = _evolving_prereq_ids(transitions)
                     best = {
@@ -618,7 +586,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                         "monster_id": species_id,
                         "name": display_name,
                         "capture_locations": is_capturable(db, species_id, reachable),
-                        "native_talents": native,
+                        "native_talents": synth_native,
                         "required_talents": set(required_talents),
                         "transitions": transitions,
                         "parent1": sub1,
@@ -653,7 +621,6 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
             if not inter2:
                 continue
             cost = _combine_cost(inter1["cost"], inter2["cost"])
-            cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
             if best is None or cost < best["cost"]:
                 evolving_ids = _evolving_prereq_ids(transitions)
                 best = {
@@ -661,7 +628,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                     "monster_id": species_id,
                     "name": display_name,
                     "capture_locations": is_capturable(db, species_id, reachable),
-                    "native_talents": native,
+                    "native_talents": synth_native,
                     "required_talents": set(required_talents),
                     "transitions": transitions,
                     "parent1": inter1,
@@ -703,7 +670,6 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
         if not sub2:
             continue
         cost = _combine_cost(sub1["cost"], sub2["cost"])
-        cost = (cost[0], cost[1] + _single_parent_penalty(transitions, req1, req2))
         if best is None or cost < best["cost"]:
             evolving_ids = _evolving_prereq_ids(transitions)
             best = {
