@@ -225,16 +225,11 @@ class Database:
     def level_for_maxed_points(self, target_points):
         """Niveau MINIMUM auquel UN monstre, en investissant tous ses
         points de competence disponibles, a accumule assez de points
-        pour MAXER 'target_points' (ex: 200 pts pour maxer Attack
-        Booster II).
-
-        IMPORTANT (correction) : lors d'une synthese "a points" (ex:
-        Attack Booster II -> III), les DEUX parents doivent CHACUN avoir
-        deja MAXE le talent prerequis - ce n'est PAS un pot commun ou
-        les points des 2 parents s'additionnent. Le niveau requis est
-        donc celui auquel UN SEUL monstre (courbe SkillPointLevel.csv)
-        atteint 'target_points', et ce MEME niveau est exige des DEUX
-        parents (pas de division par 2)."""
+        pour MAXER 'target_points' A LUI SEUL (ex: talents "a points"
+        classiques comme Shallow Breather -> Deep Breather, ou les
+        differents "Ward" a paliers) : chaque parent doit
+        INDIVIDUELLEMENT atteindre ce seuil, leurs points ne se
+        combinent pas."""
         if not target_points:
             return DEFAULT_MIN_LEVEL
         for lvl, cumulative in self.level_points_curve:
@@ -243,44 +238,76 @@ class Database:
         # meme au niveau max, un monstre seul n'atteint pas le seuil
         return self.level_points_curve[-1][0] if self.level_points_curve else DEFAULT_MIN_LEVEL
 
+    def level_for_pooled_points(self, target_points):
+        """Niveau MINIMUM auquel DEUX parents, en COMBINANT les points
+        qu'ils ont chacun investis dans le MEME talent prerequis
+        (chacun investissant tout dans ce talent, a ce niveau),
+        atteignent ENSEMBLE le seuil 'target_points' necessaire pour
+        debloquer le palier superieur.
+
+        Regle specifique aux talents "Booster" (Attack/Defence/
+        Agility/Wisdom/HP/MP) et "Afficionado" (lignes d'affinite
+        elementaire) - cf. is_stat_progression_talent : pour ces
+        talents, la somme des points investis par les DEUX parents doit
+        atteindre le seuil de points necessaire pour maxer le talent
+        lors de la synthese - AUCUN des deux parents n'a besoin de
+        l'avoir maxe A LUI SEUL. On cherche donc le niveau L (le MEME
+        pour les deux parents, par simplification) tel que
+        2 x Total(L) >= target_points."""
+        if not target_points:
+            return DEFAULT_MIN_LEVEL
+        for lvl, cumulative in self.level_points_curve:
+            if 2 * cumulative >= target_points:
+                return max(lvl, DEFAULT_MIN_LEVEL)
+        # meme au niveau max, les 2 parents combines n'atteignent pas le seuil
+        return self.level_points_curve[-1][0] if self.level_points_curve else DEFAULT_MIN_LEVEL
+
     def recommended_level(self, talent_ids):
-        """Niveau recommande pour qu'un monstre (l'UN OU L'AUTRE des 2
-        parents d'une synthese, le MEME niveau etant exige des deux)
-        puisse porter les talents donnes DEJA MAXES.
+        """Niveau recommande pour les 2 parents d'une synthese qui
+        doivent faire evoluer les talents donnes (le MEME niveau etant
+        vise pour les deux, par simplification).
 
-        CORRECTION IMPORTANTE : lors d'une synthese "a points" (ex:
-        Attack Booster II -> III), les recettes de TalentSynthesis.csv
-        exigent que les DEUX parents aient INDIVIDUELLEMENT deja MAXE
-        le talent prerequis - ce n'est jamais un cumul a deux (leurs
-        points ne se combinent pas). Le niveau recommande est donc
-        celui auquel UN SEUL monstre atteint le seuil de points requis
-        (cf. level_for_maxed_points), et ce meme niveau s'applique aux
-        DEUX parents.
+        DEUX REGLES DIFFERENTES selon le type de talent (fournies par
+        l'utilisateur) :
+        - Talents "Booster"/"Afficionado" (cf.
+          is_stat_progression_talent) : la SOMME des points investis
+          par les DEUX parents dans ce talent doit atteindre le seuil
+          de points pour le maxer - ils n'ont PAS besoin de l'avoir
+          maxe chacun individuellement (cf. level_for_pooled_points).
+        - Tous les AUTRES talents "a points" (ex: Shallow Breather ->
+          Deep Breather, les differents "Ward" a paliers) : LES DEUX
+          parents doivent AVOIR INDIVIDUELLEMENT maxe le talent
+          prerequis, leurs points ne se combinent pas (cf.
+          level_for_maxed_points).
 
-        Si le noeud doit faire evoluer PLUSIEURS talents A LA FOIS sur
-        UN MEME parent (ex: 2 talents actifs simultanement), le niveau
-        doit permettre d'accumuler assez de points pour CHACUN d'eux
-        independamment - chaque talent a sa propre barre de points a
-        remplir, avec le MEME pool de points gagnes par niveau. Le
-        seuil total necessaire POUR CE PARENT est donc la SOMME des
-        seuils de chaque talent (pas seulement le plus exigeant), sinon
-        on sous-estimerait le niveau reellement necessaire des que
-        plusieurs talents evoluent simultanement sur le meme individu.
+        Si le noeud doit faire evoluer PLUSIEURS talents A LA FOIS (ex:
+        2 talents actifs simultanement sur les memes parents), les
+        seuils de points de chaque groupe (pool vs individuel) sont
+        SOMMES separement avant de determiner le niveau de chaque
+        groupe, puis le niveau final retenu est le PLUS ELEVE des deux
+        groupes (le meme niveau devant satisfaire toutes les
+        exigences).
 
         Si aucun des talents n'a de seuil de points connu (ou liste
         vide), on applique le niveau minimum par defaut
         (DEFAULT_MIN_LEVEL)."""
-        total_points = 0
+        pooled_points = 0
+        individual_points = 0
         found_any = False
         for tid in talent_ids:
             max_points = self.talent_max_points.get(tid)
             if not max_points:
                 continue
-            total_points += max_points
             found_any = True
+            if is_stat_progression_talent(self, tid):
+                pooled_points += max_points
+            else:
+                individual_points += max_points
         if not found_any:
             return DEFAULT_MIN_LEVEL
-        return max(self.level_for_maxed_points(total_points), DEFAULT_MIN_LEVEL)
+        level_pooled = self.level_for_pooled_points(pooled_points) if pooled_points else 0
+        level_individual = self.level_for_maxed_points(individual_points) if individual_points else 0
+        return max(level_pooled, level_individual, DEFAULT_MIN_LEVEL)
 
 
 # ---------------------------------------------------------------------------

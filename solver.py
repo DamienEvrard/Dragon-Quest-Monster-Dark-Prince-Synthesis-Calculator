@@ -150,15 +150,26 @@ MAX_CALLS = 1500000                  # garde-fou : arrete la recherche au-dela (
 # ---------------------------------------------------------------------------
 # COUT A 2 DIMENSIONS : (nombre_de_syntheses, difficulte_cumulee)
 # ---------------------------------------------------------------------------
-# Le "cout" d'un noeud n'est plus un simple entier (nombre de syntheses),
-# mais un TUPLE (nb_syntheses, difficulte). Python compare les tuples
-# lexicographiquement : le nombre de syntheses reste le critere principal
-# (un arbre plus court gagne toujours), mais A NOMBRE DE SYNTHESES EGAL,
-# celui utilisant des monstres plus FACILES A OBTENIR (rang bas, zone peu
-# avancee) l'emporte. Ca evite par exemple qu'un Slime "Metal" (rang
-# eleve, zone tardive, notoirement difficile a capturer en pratique meme
-# si techniquement "capturable") ne soit prefere a un Gluant de base
-# quand les deux menent au meme resultat en autant d'etapes.
+# PRIORITE ABSOLUE : minimiser le nombre de NOEUDS de l'arbre genere. Pour
+# un arbre de synthese (structure binaire), le nombre total de noeuds est
+# une fonction directe du nombre de syntheses : total_noeuds = 2 x
+# nb_syntheses + 1 (chaque synthese ajoute exactement 1 noeud interne + 1
+# nouvelle feuille par rapport a une feuille isolee). Minimiser
+# nb_syntheses revient donc STRICTEMENT a minimiser le nombre de noeuds -
+# c'est pourquoi nb_syntheses est le premier element du tuple de cout et
+# domine TOUJOURS la comparaison (Python compare les tuples
+# lexicographiquement : le nombre de syntheses/noeuds l'emporte toujours,
+# quelle que soit la difference de "difficulte").
+#
+# Le "cout" d'un noeud n'est donc pas un simple entier, mais un TUPLE
+# (nb_syntheses, difficulte) : A NOMBRE DE NOEUDS EGAL SEULEMENT, celui
+# utilisant des monstres plus FACILES A OBTENIR (rang bas, zone peu
+# avancee) l'emporte comme simple depart-egalite. Ca evite par exemple
+# qu'un Slime "Metal" (rang eleve, zone tardive, notoirement difficile a
+# capturer en pratique meme si techniquement "capturable") ne soit
+# prefere a un Gluant de base quand les deux menent au meme resultat en
+# autant d'etapes - mais ce critere secondaire ne peut JAMAIS faire
+# gagner un arbre ayant plus de noeuds.
 
 def _wild_cost(db, monster, reachable):
     """Cout d'une feuille obtenue par capture (ou oeuf special) : 0
@@ -204,12 +215,17 @@ class _SearchBudget:
 
     def should_stop_early(self):
         """Passe en mode 'satisficing' (accepter la premiere solution
-        valide trouvee plutot que de continuer a chercher mieux) une
-        fois qu'une bonne partie du budget est deja consommee. Evite
-        qu'un arbre genealogique tres profond (beaucoup de niveaux et
-        de recettes alternatives) n'epuise tout le budget a essayer
-        d'optimiser au lieu de trouver ne serait-ce QU'UNE solution."""
-        return self.calls > self.limit * 0.4
+        valide trouvee plutot que de continuer a chercher mieux) UNIQUEMENT
+        une fois que la QUASI-TOTALITE du budget est consommee. Le nombre
+        de noeuds de l'arbre etant la priorite absolue (cf. section "COUT
+        A 2 DIMENSIONS" plus haut), on laisse la recherche explorer le
+        plus longtemps possible les alternatives pour trouver un arbre
+        plus petit avant de se contenter d'une premiere solution trouvee -
+        ce declenchement tardif ne sert qu'a eviter qu'un arbre
+        genealogique tres profond (beaucoup de niveaux et de recettes
+        alternatives) n'epuise tout le budget sans meme avoir trouve UNE
+        seule solution valide."""
+        return self.calls > self.limit * 0.85
 
 
 GREEDY_BRANCH_DEPTH_LIMIT = 5  # au-dela de cette profondeur, un seul choix par talent (evite l'explosion)
@@ -511,6 +527,21 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
             and not is_family_placeholder(m)
             and rank_meets_minimum(m["RankId"], rank_id, rank_is_any)
         }
+        # IMPORTANT : on trie les candidats par RARETE croissante (rang
+        # bas + zone peu avancee en premier, cf. capture_difficulty)
+        # avant de les essayer. 'candidate_ids' est un set (ordre non
+        # deterministe) - sans ce tri, le budget de recherche ou le
+        # declenchement de should_stop_early() pourrait arreter la
+        # boucle sur un candidat pris au hasard (potentiellement rare/
+        # difficile) avant meme d'avoir essaye le plus commun. Avec ce
+        # tri, le candidat le plus simple est TOUJOURS tente en premier
+        # et devient le "best" initial, garantissant qu'un arret
+        # anticipe ne peut jamais faire perdre le candidat le plus
+        # accessible au profit d'un plus rare.
+        candidate_order = sorted(
+            candidate_ids,
+            key=lambda cid: capture_difficulty(db, db.monster_by_id.get(cid), reachable),
+        )
         best = None
 
         # --- Greffe : si un arbre intermediaire independant a deja ete
@@ -525,7 +556,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
             if grafted and grafted.get("monster_id") in candidate_ids:
                 best = grafted
 
-        for cand_id in candidate_ids:
+        for cand_id in candidate_order:
             if not budget.tick():
                 break
             if best is not None and budget.should_stop_early():
@@ -849,9 +880,11 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
     Beaucoup moins couteux que la recherche globale unifiee car
     circonscrit a UN SEUL talent, et le budget est bride PAR CANDIDAT
     (un candidat recalcitrant n'empeche pas d'essayer les suivants).
-    S'arrete au PREMIER succes trouve (privilegie la rapidite/fiabilite
-    sur l'optimalite absolue, coherent avec l'esprit "diviser pour
-    reduire la complexite").
+    S'arrete des qu'une capture sauvage directe (0 synthese, le minimum
+    absolu de noeuds) est trouvee ; sinon continue d'essayer les
+    candidats suivants (dans la limite de FAMILY_SCOPE_MAX_CANDIDATES)
+    pour garder le resultat avec le MOINS DE NOEUDS parmi ceux trouves,
+    plutot que de s'arreter au tout premier succes.
 
     'cache' (dict optionnel, partage entre plusieurs appels) evite de
     refaire la meme recherche si le meme (famille, rang, talent)
@@ -885,6 +918,11 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
     # monstre difficile (ex: Slime "Metal", rang eleve/zone tardive)
     # alors qu'un candidat bien plus simple existe dans la meme famille.
     native_candidates.sort(key=lambda m: capture_difficulty(db, m, reachable))
+    # Meme tri pour les candidats NON natifs (necessitant leur propre
+    # synthese) : un rang plus bas correspond generalement a une
+    # genealogie plus courte/simple, donc plus de chances de produire
+    # un arbre avec MOINS de noeuds.
+    other_candidates.sort(key=lambda m: capture_difficulty(db, m, reachable))
 
     ordered_candidates = (native_candidates + other_candidates)[:FAMILY_SCOPE_MAX_CANDIDATES]
 
@@ -893,8 +931,17 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
         budget = _SearchBudget(limit=FAMILY_SCOPE_MAX_CALLS_PER_CANDIDATE)
         sub = solve_monster(db, cand["MonsterId"], frozenset({talent_id}), reachable, budget, excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs)
         if sub:
-            result = sub
-            break  # premier succes : on s'arrete (rapidite avant optimalite)
+            if result is None or sub["cost"] < result["cost"]:
+                result = sub
+            # Une capture sauvage directe (0 synthese) est le minimum
+            # absolu de noeuds pour ce talent - impossible de faire
+            # mieux, inutile de continuer a chercher. Sinon, on
+            # continue d'essayer les candidats suivants (dans la limite
+            # de FAMILY_SCOPE_MAX_CANDIDATES) pour tenter de trouver un
+            # arbre avec moins de noeuds plutot que de s'arreter au
+            # premier succes trouve.
+            if result["cost"][0] == 0:
+                break
 
     if cache is not None:
         cache[cache_key] = result
