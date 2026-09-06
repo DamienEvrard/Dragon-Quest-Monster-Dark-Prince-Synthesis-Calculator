@@ -948,6 +948,27 @@ def solve_family_scoped(db, family_id, rank_id, rank_is_any, talent_id, reachabl
     return result
 
 
+def _collect_covered_talents(node, acc=None):
+    """Parcourt (recursif) un sous-arbre DEJA GREFFE (construit pour un
+    talent precis via build_intermediate_talent_trees/resolve_talent_chain)
+    et collecte l'union de tous les TalentId qu'il transporte deja
+    (natifs ou requis a chaque etape). Utilise pour eviter de
+    RECONSTRUIRE un talent demande dans une AUTRE branche de l'arbre
+    alors qu'il est deja obtenu au passage de la construction d'un
+    AUTRE talent demande (ex: si le talent B fait partie de la chaine
+    de construction du talent A, et que A a deja ete greffe quelque
+    part, B n'a pas besoin de son propre emplacement separe)."""
+    if acc is None:
+        acc = set()
+    acc |= node.get("required_talents", set()) or set()
+    acc |= node.get("native_talents", set()) or set()
+    for key in ("parent1", "parent2"):
+        child = node.get(key)
+        if child:
+            _collect_covered_talents(child, acc)
+    return acc
+
+
 def decompose_and_graft(db, target_species, final_talent_ids, reachable, excluded_wild_ids=None, include_eggs=True):
     """Strategie de secours (cf. section 7 ci-dessus) : resout l'espece
     seule, puis introduit independamment chaque talent demande a la
@@ -995,6 +1016,11 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable, exclude
 
     free_slots = collect_free_slots(species_tree)
     assigned = set(already_native)
+    # Talents deja obtenus "au passage" par une greffe precedente pour
+    # UN AUTRE talent demande (cf. _collect_covered_talents) - evite de
+    # reconstruire un talent demande dans une autre branche de l'arbre
+    # alors qu'il est deja transporte par une construction existante.
+    covered_talents = set()
 
     # --- PASSE 1 : talents simples (racine sauvage directe) ----------
     intermediate_trees = build_intermediate_talent_trees(db, set(remaining), reachable, excluded_wild_ids)
@@ -1004,6 +1030,13 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable, exclude
         if not remaining:
             break
         for talent_id in list(remaining):
+            if talent_id in covered_talents:
+                # Deja obtenu via la construction d'un autre talent
+                # demande, plus loin dans l'arbre - inutile de lui
+                # dedier un emplacement separe.
+                assigned.add(talent_id)
+                remaining.remove(talent_id)
+                continue
             graft = intermediate_trees.get(talent_id)
             if not graft or not graft.get("monster_id"):
                 continue
@@ -1017,6 +1050,7 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable, exclude
                 slot.update(graft)
                 assigned.add(talent_id)
                 remaining.remove(talent_id)
+                covered_talents |= _collect_covered_talents(slot)
                 break
 
     # --- PASSE 2 : divide & conquer pour les talents complexes restants
@@ -1031,12 +1065,17 @@ def decompose_and_graft(db, target_species, final_talent_ids, reachable, exclude
             rank = slot["free_rank_id"]
             is_any = slot["free_rank_is_any"]
             for talent_id in list(remaining):
+                if talent_id in covered_talents:
+                    assigned.add(talent_id)
+                    remaining.remove(talent_id)
+                    continue
                 solved = solve_family_scoped(db, fam, rank, is_any, talent_id, reachable, family_scope_cache, excluded_wild_ids, include_eggs)
                 if solved:
                     slot.clear()
                     slot.update(solved)
                     assigned.add(talent_id)
                     remaining.remove(talent_id)
+                    covered_talents |= _collect_covered_talents(slot)
                     break
 
     unassigned = set(remaining)
