@@ -28,13 +28,14 @@
             talent2: form.talent2.value.trim(),
             talent3: form.talent3.value.trim(),
             zone: form.zone.value.trim(),
+            include_eggs: form.include_eggs ? form.include_eggs.checked : true,
         };
     }
 
     function signatureOf(values) {
         return [values.monster, values.talent1, values.talent2, values.talent3, values.zone]
             .map((v) => (v || "").toLowerCase())
-            .join("|");
+            .join("|") + "|eggs:" + (values.include_eggs ? "1" : "0");
     }
 
     let currentTreeId = null; // id de l'arbre en cours d'affichage, si deja enregistre
@@ -108,10 +109,11 @@
 
             const talents = [entry.talent1, entry.talent2, entry.talent3].filter(Boolean).join(", ") || "—";
             const progress = entry.validatedPaths ? entry.validatedPaths.length : 0;
+            const eggsNote = entry.include_eggs === false ? " · 🥚 œufs exclus" : "";
 
             card.innerHTML = `
                 <div class="saved-tree-name">${escapeHtml(entry.monster)}</div>
-                <div class="saved-tree-talents">🎯 ${escapeHtml(talents)}</div>
+                <div class="saved-tree-talents">🎯 ${escapeHtml(talents)}${eggsNote}</div>
                 <div class="saved-tree-progress">${progress} noeud(s) validé(s)</div>
                 <div class="saved-tree-actions">
                     <button type="button" class="btn-load">Charger</button>
@@ -138,6 +140,11 @@
         form.talent2.value = entry.talent2 || "";
         form.talent3.value = entry.talent3 || "";
         form.zone.value = entry.zone || "";
+        if (form.include_eggs) {
+            // Anciens arbres enregistres avant l'ajout de cette option :
+            // valeur par defaut = coche (comportement historique).
+            form.include_eggs.checked = entry.include_eggs === undefined ? true : !!entry.include_eggs;
+        }
         form.submit();
     }
 
@@ -178,6 +185,7 @@
                 talent2: values.talent2,
                 talent3: values.talent3,
                 zone: values.zone,
+                include_eggs: values.include_eggs,
                 validatedPaths: Array.from(document.querySelectorAll("#tree-wrapper .node.validated[data-path]"))
                     .map((el) => el.getAttribute("data-path")),
                 createdAt: Date.now(),
