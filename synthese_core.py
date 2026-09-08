@@ -652,9 +652,11 @@ def resolve_talent_chain(db, talent_id, reachable_locations, _visited=None, _dep
                 resolve_talent_chain(db, tid, reachable_locations, visited_next, _depth + 1, _max_depth, _max_options, excluded_wild_ids)
                 for tid in recipe["combo"]
             ]
+            # Les 2 prerequis (un par parent) doivent chacun etre MAXES
+            # sur leur propre parent, independamment l'un de l'autre.
             node["options"].append({
                 "category": "simple",
-                "recommended_level": DEFAULT_MIN_LEVEL,
+                "recommended_level": max(db.recommended_level({tid}) for tid in recipe["combo"]),
                 "slots": slots,
             })
 
@@ -882,7 +884,7 @@ def detect_recipe_talent_transitions(db, parent1_talent_ids, parent2_talent_ids,
                         "category": "simple",
                         "result_name": db.talent_by_id[result_id]["Name"],
                         "combo_names": [db.talent_by_id[a]["Name"], db.talent_by_id[b]["Name"]],
-                        "recommended_level": DEFAULT_MIN_LEVEL,
+                        "recommended_level": max(db.recommended_level({a}), db.recommended_level({b})),
                     })
                     break
     return transitions

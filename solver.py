@@ -177,18 +177,41 @@ def _wild_cost(db, monster, reachable):
     return (0, capture_difficulty(db, monster, reachable))
 
 
-def _evolving_prereq_ids(transitions):
-    """Parmi les transitions de talent declenchees a un noeud de
-    synthese, ne garde que les prerequis des talents "a points" qui
-    EVOLUENT reellement a CETTE etape (palier superieur d'un Booster,
-    d'un Afficionado, ou de tout autre talent a paliers). Un talent
-    simplement TRANSMIS tel quel a l'enfant (deja possede par un
-    parent, sans aucune transformation) n'a AUCUN prerequis de niveau -
-    seuls les talents qui evoluent ICI comptent pour determiner le
-    niveau recommande des parents de cette synthese (categorie
-    "simple" exclue aussi : combiner 2 talents differents en un
-    nouveau necessite juste de les POSSEDER, pas de les avoir maxes)."""
-    return {t["prereq_ids"][0] for t in transitions if t.get("category") == "points"}
+def _node_recommended_level(db, transitions):
+    """Calcule le niveau recommande pour un noeud de synthese : ce
+    niveau doit permettre a un monstre de MAXER (ou d'atteindre le
+    palier necessaire) de TOUS les talents necessaires pour la
+    synthese qui se declenche a ce noeud - qu'il s'agisse d'un talent
+    "a points" (categorie "points" : Booster/Afficionado ou tout autre
+    talent a paliers classique, ex: Shallow Breather -> Deep Breather)
+    ou de l'un des 2 prerequis d'une synthese "simple" (2 talents
+    differents combines en un nouveau, ex: Woosh Virtuoso + Sizz
+    Virtuoso -> Polariser).
+
+    Un talent simplement TRANSMIS tel quel a l'enfant (deja possede
+    par un parent, sans aucune transformation) n'a AUCUN prerequis de
+    niveau - seuls les talents qui evoluent/se combinent ICI comptent.
+
+    On rassemble donc TOUS les prerequis de TOUTES les transitions qui
+    se declenchent a ce noeud dans un seul ensemble, et
+    Database.recommended_level() se charge de sommer correctement
+    leurs seuils de points (regle "pooled" - somme des 2 parents - pour
+    les talents Booster/Afficionado, regle "individuelle" - somme sur
+    UN SEUL parent - pour tous les autres) : le niveau renvoye garantit
+    ainsi qu'un monstre a ce niveau dispose d'assez de points pour
+    TOUS les maxer, quelle que soit la repartition exacte entre les 2
+    parents.
+
+    Renvoie None si aucune transition ne necessite de niveau
+    particulier a ce noeud (talents simplement transmis, sans
+    evolution)."""
+    all_prereq_ids = set()
+    for t in transitions:
+        if t.get("category") == "points":
+            all_prereq_ids.add(t["prereq_ids"][0])
+        elif t.get("category") == "simple":
+            all_prereq_ids.update(t.get("prereq_ids", []))
+    return db.recommended_level(all_prereq_ids) if all_prereq_ids else None
 
 
 def _combine_cost(cost1, cost2):
@@ -279,7 +302,16 @@ def _assign_talents(db, remaining, idx=0, req1=None, req2=None, transitions=None
             recipe_branches.append(({prereq}, {prereq}, transition))
         else:
             a, b = recipe["combo"]
-            transition = {"category": "simple", "result_id": talent_id, "prereq_ids": [a, b]}
+            # Les 2 talents (un par parent) doivent chacun etre MAXES
+            # sur leur propre parent - independamment l'un de l'autre
+            # (ce ne sont pas les memes individus, leurs seuils de
+            # points ne se combinent donc jamais entre eux).
+            transition = {
+                "category": "simple",
+                "result_id": talent_id,
+                "prereq_ids": [a, b],
+                "recommended_level": max(db.recommended_level({a}), db.recommended_level({b})),
+            }
             recipe_branches.append(({a}, {b}, transition))
             recipe_branches.append(({b}, {a}, transition))
 
@@ -371,6 +403,10 @@ def _chain_to_solver_node(db, chain_node, collected=None):
                 "category": "simple",
                 "result_id": talent_id,
                 "prereq_ids": [option["slots"][0]["talent_id"], option["slots"][1]["talent_id"]],
+                "recommended_level": max(
+                    db.recommended_level({option["slots"][0]["talent_id"]}),
+                    db.recommended_level({option["slots"][1]["talent_id"]}),
+                ),
             }
         node = {
             "kind": "synth",
@@ -611,7 +647,6 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                     continue
                 cost = _combine_cost(sub1["cost"], sub2["cost"])
                 if best is None or cost < best["cost"]:
-                    evolving_ids = _evolving_prereq_ids(transitions)
                     best = {
                         "kind": "synth",
                         "monster_id": species_id,
@@ -622,7 +657,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                         "transitions": transitions,
                         "parent1": sub1,
                         "parent2": sub2,
-                        "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
+                        "recommended_level": _node_recommended_level(db, transitions),
                         "cost": cost,
                     }
             continue
@@ -653,7 +688,6 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                 continue
             cost = _combine_cost(inter1["cost"], inter2["cost"])
             if best is None or cost < best["cost"]:
-                evolving_ids = _evolving_prereq_ids(transitions)
                 best = {
                     "kind": "synth",
                     "monster_id": species_id,
@@ -664,7 +698,7 @@ def solve_monster(db, species_id, required_talents, reachable, budget=None, cach
                     "transitions": transitions,
                     "parent1": inter1,
                     "parent2": inter2,
-                    "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
+                    "recommended_level": _node_recommended_level(db, transitions),
                     "cost": cost,
                 }
 
@@ -702,7 +736,6 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
             continue
         cost = _combine_cost(sub1["cost"], sub2["cost"])
         if best is None or cost < best["cost"]:
-            evolving_ids = _evolving_prereq_ids(transitions)
             best = {
                 "kind": "intermediate",
                 "monster_id": None,
@@ -713,7 +746,7 @@ def _solve_intermediate_pair(db, gp_a, gp_b, required_talents, reachable, budget
                 "transitions": transitions,
                 "parent1": sub1,
                 "parent2": sub2,
-                "recommended_level": db.recommended_level(evolving_ids) if evolving_ids else None,
+                "recommended_level": _node_recommended_level(db, transitions),
                 "cost": cost,
             }
 

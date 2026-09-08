@@ -84,9 +84,13 @@ def render_transition_banner(db, transitions):
             )
         else:
             a, b = prereq_names
+            level = t.get("recommended_level")
+            if level is None:
+                level = max(db.recommended_level({t["prereq_ids"][0]}), db.recommended_level({t["prereq_ids"][1]}))
             txt = (
-                f'🔧 Un parent avec <strong>{a}</strong>, l\'autre avec <strong>{b}</strong> → '
-                f'devient <strong>{result_name}</strong>'
+                f'🔧 Un parent doit déjà avoir <strong>{a}</strong> maxé, l\'autre <strong>{b}</strong> maxé → '
+                f'devient <strong>{result_name}</strong> '
+                f'— 🎓 niveau {level}+'
             )
         parts.append(f'<div class="transition-line">{txt}</div>')
     return f'<div class="transition-banner">{"".join(parts)}</div>'
