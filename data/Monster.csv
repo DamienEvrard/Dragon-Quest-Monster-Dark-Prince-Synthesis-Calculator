@@ -173,7 +173,7 @@ MonsterId,FamilyId,RankId,Number,Name,JapaneseName,FrenchName,Identifier,HP,MP,A
 606,7,5,475,Dullahan,デュラハーン,Décapitête,dullahan,2,2,2,3,2,4,1320,400,500,590,480,670,,,
 154,5,1,279,Eggsoskeleton,からくりエッグ,Mécanœuf,eggsoskeleton,1,1,2,2,2,1,1370,360,570,520,510,380,,1,
 351,1,7,61,Emperor Slime,スライムエンペラー,Sultant gluant,emperor-slime,4,3,3,3,2,3,1380,390,580,470,420,520,,,
-437,4,7,273,Equinox,黒竜丸,Équinocte,equinox,3,3,4,3,4,2,1300,400,640,530,570,350,,,
+437,4,7,273,Equinox,黒竜丸,Équinox,equinox,3,3,4,3,4,2,1300,400,640,530,570,350,,,
 155,5,2,297,Erazor Blade,ひとくいサーベル,Cimetueur,erazor-blade,1,2,2,2,3,2,1310,360,600,510,570,450,,,
 156,5,3,308,Escudogre,シールドオーガ,Blindogre,escudogre,2,2,3,4,2,1,1330,380,610,720,450,360,,,
 632,8,9,519,Estark,エスターク,Estark,estark,5,2,3,3,3,3,1400,290,520,480,470,550,,,

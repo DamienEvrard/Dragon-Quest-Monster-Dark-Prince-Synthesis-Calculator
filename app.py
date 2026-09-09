@@ -26,6 +26,7 @@ from synthese_core import (
 )
 from solver import solve, decompose_and_graft
 from synthese_core import resolve_talent_chain, simplify_chain, find_blocking_talent, talent_exists_anywhere, get_talent_recipes
+from ai import DQM3Planner, PlannerRequest
 
 app = Flask(__name__)
 
@@ -435,6 +436,124 @@ def is_capturable_all(monster_id):
 
 _COMPENDIUM_CACHE = None
 
+
+
+@app.route("/ai-planner", methods=["GET"])
+def ai_planner_page():
+    return render_template(
+        "ai_planner.html",
+        active_tab="ai",
+        monster_names=MONSTER_NAMES,
+        talent_names=TALENT_NAMES,
+        location_names=LOCATION_NAMES,
+    )
+
+
+def _ai_json_to_solver_node(data):
+    """Reconstruit un noeud solver depuis la representation JSON de l'AI.
+    Cela permet de reutiliser EXACTEMENT le meme renderer HTML que l'arbre
+    classique, au lieu de maintenir un deuxieme rendu visuel."""
+    if not data:
+        return None
+    return {
+        "kind": data.get("kind", "synth"),
+        "monster_id": data.get("monster_id"),
+        "name": data.get("name", "Monstre"),
+        "capture_locations": data.get("capture_locations", []) or [],
+        "native_talents": set(),
+        "required_talents": {
+            t["id"] if isinstance(t, dict) and "id" in t else t
+            for t in []
+        },
+        "transitions": data.get("transitions", []) or [],
+        "parent1": _ai_json_to_solver_node(data.get("parent1")),
+        "parent2": _ai_json_to_solver_node(data.get("parent2")),
+        "recommended_level": data.get("recommended_level"),
+        "cost": data.get("cost", 0),
+        "grafted_talent": bool(data.get("grafted_talent", False)),
+    }
+
+
+def _ai_json_to_solver_node_with_talent_names(data):
+    """Version de reconstruction qui convertit les noms de talents JSON
+    en IDs de la base, necessaires au renderer historique."""
+    if not data:
+        return None
+    required=set()
+    native=set()
+    for name in data.get("required_talents", []) or []:
+        t=db.talent_by_name.get(str(name).strip().lower())
+        if t: required.add(t["TalentId"])
+    for name in data.get("native_talents", []) or []:
+        t=db.talent_by_name.get(str(name).strip().lower())
+        if t: native.add(t["TalentId"])
+    transitions=[]
+    for tr in data.get("transitions", []) or []:
+        x=dict(tr)
+        # tree_to_json keeps transition IDs, so they are already usable.
+        transitions.append(x)
+    return {
+        "kind": data.get("kind", "synth"),
+        "monster_id": data.get("monster_id"),
+        "name": data.get("name", "Monstre"),
+        "capture_locations": data.get("capture_locations", []) or [],
+        "native_talents": native,
+        "required_talents": required,
+        "transitions": transitions,
+        "parent1": _ai_json_to_solver_node_with_talent_names(data.get("parent1")),
+        "parent2": _ai_json_to_solver_node_with_talent_names(data.get("parent2")),
+        "recommended_level": data.get("recommended_level"),
+        "cost": data.get("cost", 0),
+        "grafted_talent": bool(data.get("grafted_talent", False)),
+    }
+
+
+@app.route("/api/ai/plan", methods=["POST"])
+def api_ai_plan():
+    """Planificateur IA local : JSON in -> JSON out.
+
+    Exemple:
+    {
+      "monster": "Uberkilling Machine",
+      "talents": ["Attack Booster IV", "Critical Mastery"],
+      "zone": "Circle of Conquest - Lower Echelon",
+      "goal": "physical_dps",
+      "owned": ["123", "456"],
+      "excluded_wild": ["789"],
+      "top": 5,
+      "max_calls": 30000
+    }
+    """
+    payload = request.get_json(silent=True) or {}
+    req = PlannerRequest(
+        target_monster=str(payload.get("monster", "")).strip(),
+        talents=[str(x).strip() for x in payload.get("talents", []) if str(x).strip()],
+        last_zone=str(payload.get("zone", "")).strip(),
+        excluded_wild_ids={str(x) for x in payload.get("excluded_wild", [])},
+        owned_monster_ids={str(x) for x in payload.get("owned", [])},
+        include_eggs=bool(payload.get("include_eggs", True)),
+        max_calls=int(payload.get("max_calls", 30000)),
+        top_k=max(1, min(int(payload.get("top", 5)), 20)),
+        objective=str(payload.get("goal", "balanced")),
+        stat_weights=payload.get("stat_weights", {}) or {},
+    )
+    try:
+        result = DQM3Planner(db).plan(req).to_dict()
+        final_talent_ids = set()
+        for talent_name in req.talents:
+            talent = db.talent_by_name.get(talent_name.lower())
+            if talent:
+                final_talent_ids.add(talent["TalentId"])
+
+        # Reutilise le renderer de l'arbre classique : memes classes CSS,
+        # memes badges, memes icones, meme bandeau de transition, meme
+        # structure DOM et donc meme rendu visuel.
+        for candidate in result.get("candidates", []):
+            solver_root = _ai_json_to_solver_node_with_talent_names(candidate.get("tree"))
+            candidate["tree_html"] = str(render_solution_html(db, solver_root, final_talent_ids)) if solver_root else ""
+        return jsonify(result)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
 @app.route("/compendium", methods=["GET"])
 def compendium():

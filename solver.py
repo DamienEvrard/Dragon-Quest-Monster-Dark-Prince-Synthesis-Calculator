@@ -142,9 +142,9 @@ from synthese_core import (
     get_synth_native_talents,
 )
 
-MAX_DEPTH = 16
-MAX_TALENT_RECIPES_PER_TALENT = 2   # limite l'explosion combinatoire
-MAX_CALLS = 1500000                  # garde-fou : arrete la recherche au-dela (~3-5s)
+MAX_DEPTH = 20
+MAX_TALENT_RECIPES_PER_TALENT = 10   # limite l'explosion combinatoire
+MAX_CALLS = 2000000                  # garde-fou : arrete la recherche au-dela (~3-5s)
 
 
 # ---------------------------------------------------------------------------
@@ -248,10 +248,10 @@ class _SearchBudget:
         genealogique tres profond (beaucoup de niveaux et de recettes
         alternatives) n'epuise tout le budget sans meme avoir trouve UNE
         seule solution valide."""
-        return self.calls > self.limit * 0.85
+        return self.calls > self.limit * 0.95
 
 
-GREEDY_BRANCH_DEPTH_LIMIT = 5  # au-dela de cette profondeur, un seul choix par talent (evite l'explosion)
+GREEDY_BRANCH_DEPTH_LIMIT = 15  # au-dela de cette profondeur, un seul choix par talent (evite l'explosion)
 
 
 def _assign_talents(db, remaining, idx=0, req1=None, req2=None, transitions=None, greedy=None, depth=0):
@@ -897,7 +897,7 @@ def build_species_only_tree(db, target_species, reachable, excluded_wild_ids=Non
     return solve_monster(db, target_species, frozenset(), reachable, budget, excluded_wild_ids=excluded_wild_ids, include_eggs=include_eggs)
 
 
-FAMILY_SCOPE_MAX_CANDIDATES = 20         # nb max d'especes candidates essayees par talent/famille
+FAMILY_SCOPE_MAX_CANDIDATES = 200         # nb max d'especes candidates essayees par talent/famille
 FAMILY_SCOPE_MAX_CALLS_PER_CANDIDATE = 150_000  # budget dedie et borne par candidat
 
 

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}Calculateur de synthèse — DQM: The Dark Prince{% endblock %}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='ai-planner.css') }}">
 </head>
 <body>
 
@@ -14,6 +15,7 @@
         <a href="{{ url_for('index') }}" class="tab {% if active_tab == 'arbre' %}active{% endif %}">Arbre de synthèse</a>
         <a href="{{ url_for('compendium') }}" class="tab {% if active_tab == 'compendium' %}active{% endif %}">Compendium</a>
         <a href="{{ url_for('talents_page') }}" class="tab {% if active_tab == 'talents' %}active{% endif %}">Talents</a>
+        <a href="{{ url_for('ai_planner_page') }}" class="tab {% if active_tab == 'ai' %}active{% endif %}">🧠 IA Synthèse</a>
     </nav>
 </header>
 
