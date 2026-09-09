@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}IA Synthèse — DQM: The Dark Prince{% endblock %}
+{% block content %}
+<div class="ai-page">
+  <section class="ai-card ai-controls">
+    <div class="ai-title"><div><span class="ai-kicker">PLANIFICATEUR LOCAL</span><h2>🧠 Construire avec l'IA</h2><p>Demande un monstre final avec jusqu'à <strong>3 talents obligatoires</strong>. Le moteur utilise les règles de synthèse de ton projet.</p></div></div>
+
+    <div class="ai-form-grid">
+      <div class="ai-field ai-wide">
+        <label for="ai-monster">Monstre final</label>
+        <input id="ai-monster" list="ai-monster-list" placeholder="Ex. Uberkilling Machine">
+        <datalist id="ai-monster-list">{% for name in monster_names %}<option value="{{ name }}">{% endfor %}</datalist>
+      </div>
+      <div class="ai-field">
+        <label for="ai-zone">Dernière zone explorée</label>
+        <input id="ai-zone" list="ai-zone-list" placeholder="Optionnel">
+        <datalist id="ai-zone-list">{% for name in location_names %}<option value="{{ name }}">{% endfor %}</datalist>
+      </div>
+    </div>
+
+    <div class="ai-field">
+      <label>🎯 Talents obligatoires <span>— les 3 doivent être présents sur le résultat final</span></label>
+      <div class="ai-talent-grid">
+        {% for i in range(1,4) %}
+        <div class="ai-talent-wrap"><span>{{ i }}</span><input class="ai-talent" list="ai-talent-list" placeholder="Talent {{ i }}"></div>
+        {% endfor %}
+      </div>
+      <datalist id="ai-talent-list">{% for name in talent_names %}<option value="{{ name }}">{% endfor %}</datalist>
+    </div>
+
+    <div class="ai-form-grid">
+      <div class="ai-field"><label for="ai-owned">Monstres déjà possédés</label><textarea id="ai-owned" placeholder="IDs MonsterId, un par ligne ou séparés par des virgules"></textarea></div>
+      <div class="ai-field"><label for="ai-excluded">Monstres sauvages exclus</label><textarea id="ai-excluded" placeholder="MonsterId, un par ligne ou séparés par des virgules"></textarea></div>
+    </div>
+
+    <div class="ai-options">
+      <label><input id="ai-eggs" type="checkbox" checked> Inclure les œufs</label>
+      <label>Objectif <select id="ai-goal"><option value="balanced">Équilibré</option><option value="physical_dps">DPS physique</option><option value="mage">Mage</option><option value="tank">Tank</option><option value="speed">Vitesse</option></select></label>
+      <label>Solutions <select id="ai-top"><option>1</option><option>3</option><option selected>5</option><option>10</option></select></label>
+    </div>
+    <button id="ai-build" class="btn-submit">🧠 Construire l'arbre optimal</button>
+    <div id="ai-status" class="ai-status"></div>
+  </section>
+
+  <section id="ai-results" class="ai-results ai-hidden">
+    <div class="ai-results-head"><div><span class="ai-kicker">RÉSULTAT</span><h2 id="ai-result-title">Arbre de synthèse</h2><p id="ai-result-subtitle"></p></div><button id="ai-copy" class="btn-save">Copier le JSON</button></div>
+    <div id="ai-candidates" class="ai-candidates"></div>
+    <div id="ai-tree" class="ai-tree"></div>
+    <details class="ai-json"><summary>Afficher les données brutes</summary><pre id="ai-raw"></pre></details>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script>window.DQM3_AI_DATA={monsterNames:{{ monster_names|tojson }},talentNames:{{ talent_names|tojson }}};</script><script src="{{ url_for('static', filename='ai-planner.js') }}"></script>{% endblock %}
